@@ -1,10 +1,10 @@
 {
-  "name": "remotely-save",
+  "name": "v-remotely-save",
   "version": "0.5.25",
   "description": "This is yet another sync plugin for Obsidian app.",
   "scripts": {
     "dev2": "node esbuild.config.mjs --watch",
-    "build2": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "build2": "node esbuild.config.mjs production",
     "build": "webpack --mode production",
     "dev": "webpack --mode development --watch",
     "format": "npx @biomejs/biome check --write .",
