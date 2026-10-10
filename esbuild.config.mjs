@@ -57,7 +57,8 @@ esbuild
     inject: ["./esbuild.injecthelper.mjs"],
     format: "cjs",
     // watch: !prod, // no longer valid in esbuild 0.17
-    target: "es2016",
+    target: "es2022",
+    alias: { "node:url": "url" },
     logLevel: "info",
     sourcemap: prod ? false : "inline",
     treeShaking: true,
