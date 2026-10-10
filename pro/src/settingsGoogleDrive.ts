@@ -36,27 +36,29 @@ class GoogleDriveAuthModal extends Modal {
     const { contentEl } = this;
     const t = this.t;
 
-    const authUrl = "https://remotelysave.com/auth/googledrive/start";
+    const playgroundUrl = "https://developers.google.com/oauthplayground";
     const div2 = contentEl.createDiv();
     div2.createDiv({
-      text: stringToFragment(t("modal_googledriveauth_tutorial")),
+      text: stringToFragment(
+        "<p>To authenticate, generate a <b>refresh token</b> from Google using your OAuth Client ID & Secret (e.g. via <a href='https://developers.google.com/oauthplayground'>Google OAuth Playground</a> with scope <code>https://www.googleapis.com/auth/drive.file</code>) and paste it below.</p>"
+      ),
     });
     div2.createEl(
       "button",
       {
-        text: t("modal_googledriveauth_copybutton"),
+        text: "Copy OAuth Playground URL",
       },
       (el) => {
         el.onclick = async () => {
-          await navigator.clipboard.writeText(authUrl);
-          new Notice(t("modal_googledriveauth_copynotice"));
+          await navigator.clipboard.writeText(playgroundUrl);
+          new Notice("OAuth Playground URL copied to clipboard!");
         };
       }
     );
 
     contentEl.createEl("p").createEl("a", {
-      href: authUrl,
-      text: authUrl,
+      href: playgroundUrl,
+      text: playgroundUrl,
     });
 
     let refreshToken = "";
@@ -96,9 +98,9 @@ class GoogleDriveAuthModal extends Modal {
             this.plugin.settings.googledrive.accessTokenExpiresAtTimeMs =
               ts + k.expires_in * 1000 - 60 * 2 * 1000;
 
-            // manually set it expired after 60 days;
+            // Do not expire credentials
             this.plugin.settings.googledrive.credentialsShouldBeDeletedAtTimeMs =
-              Date.now() + 1000 * 60 * 60 * 24 * 59;
+              Number.MAX_SAFE_INTEGER;
             await this.plugin.saveSettings();
 
             // try to remove data in clipboard
@@ -237,10 +239,7 @@ export const generateGoogleDriveSettingsPart = (
     }),
   });
 
-  googleDriveLongDescDiv.createDiv({
-    text: stringToFragment(t("settings_googledrive_pro_desc")),
-    cls: "googledrive-disclaimer",
-  });
+  // PRO disclaimer removed for forked build
 
   const googleDriveNotShowUpHintSetting = new Setting(googleDriveDiv)
     .setName(t("settings_googledrive_notshowuphint"))
@@ -254,10 +253,8 @@ export const generateGoogleDriveSettingsPart = (
 
   const googleDriveAllowedToUsedDiv = googleDriveDiv.createDiv();
   // if pro enabled, show up; otherwise hide.
-  const allowGoogleDrive =
-    plugin.settings.pro?.enabledProFeatures.filter(
-      (x) => x.featureName === "feature-google_drive"
-    ).length === 1;
+  // Forked: Google Drive enabled directly
+  const allowGoogleDrive = true;
   console.debug(`allow to show up google drive settings? ${allowGoogleDrive}`);
   if (allowGoogleDrive) {
     googleDriveAllowedToUsedDiv.removeClass("googledrive-allow-to-use-hide");

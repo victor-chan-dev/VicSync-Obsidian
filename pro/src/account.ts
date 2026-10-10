@@ -223,9 +223,8 @@ export const checkProRunnableAndFixInplace = async (
   pluginVersion: string,
   saveUpdatedConfigFunc: () => Promise<any> | undefined
 ): Promise<true> => {
-  console.debug(`checkProRunnableAndFixInplace`);
-
-  // many checks if status is valid
+  // Forked: bypass PRO checks
+  return true;
 
   // no account
   if (config.pro === undefined || config.pro.refreshToken === undefined) {

@@ -1589,15 +1589,7 @@ export default class RemotelySavePlugin extends Plugin {
     }
 
     let googleDriveExpired = false;
-    if (
-      this.settings.googledrive.refreshToken !== "" &&
-      current >= this.settings!.googledrive!.credentialsShouldBeDeletedAtTimeMs!
-    ) {
-      console.warn(`google drive expired`);
-      googleDriveExpired = true;
-      this.settings.googledrive = cloneDeep(DEFAULT_GOOGLEDRIVE_CONFIG);
-      needSave = true;
-    }
+    // Disabled forced expiration for Google Drive credentials
 
     let boxExpired = false;
     if (

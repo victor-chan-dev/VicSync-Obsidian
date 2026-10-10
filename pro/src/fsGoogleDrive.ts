@@ -115,7 +115,9 @@ export const sendRefreshTokenReq = async (refreshToken: string) => {
     console.debug(`new token obtained`);
     return y;
   } else {
-    throw Error(`cannot refresh an access token`);
+    const errText = await x.text();
+    console.error(`cannot refresh access token (${x.status}): ${errText}`);
+    throw Error(`cannot refresh an access token (${x.status}): ${errText}`);
   }
 
   // {
