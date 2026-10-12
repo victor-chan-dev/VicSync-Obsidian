@@ -144,7 +144,7 @@ const DEFAULT_SETTINGS: RemotelySavePluginSettings = {
   onlyAllowPaths: [],
   enableStatusBarInfo: true,
   deleteToWhere: "system",
-  agreeToUseSyncV3: false,
+  agreeToUseSyncV3: true,
   conflictAction: "keep_newer",
   howToCleanEmptyFolder: "clean_both",
   protectModifyPercentage: 50,
@@ -1301,14 +1301,10 @@ export default class RemotelySavePlugin extends Plugin {
 
     this.enableCheckingFileStat();
 
-    if (!this.settings.agreeToUseSyncV3) {
-      const syncAlgoV3Modal = new SyncAlgoV3Modal(this.app, this);
-      syncAlgoV3Modal.open();
-    } else {
-      this.enableAutoSyncIfSet();
-      this.enableInitSyncIfSet();
-      this.toggleSyncOnSaveIfSet();
-    }
+    this.settings.agreeToUseSyncV3 = true;
+    this.enableAutoSyncIfSet();
+    this.enableInitSyncIfSet();
+    this.toggleSyncOnSaveIfSet();
 
     // compare versions and read new versions
     const { oldVersion } = await upsertPluginVersionByVault(
@@ -1433,7 +1429,7 @@ export default class RemotelySavePlugin extends Plugin {
     }
 
     if (this.settings.agreeToUseSyncV3 === undefined) {
-      this.settings.agreeToUseSyncV3 = false;
+      this.settings.agreeToUseSyncV3 = true;
     }
     if (this.settings.conflictAction === undefined) {
       this.settings.conflictAction = "keep_newer";
