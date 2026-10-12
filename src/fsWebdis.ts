@@ -65,7 +65,7 @@ export class FakeFsWebdis extends FakeFs {
     super();
     this.kind = "webdis";
     this.webdisConfig = webdisConfig;
-    this.remoteBaseDir = this.webdisConfig.remoteBaseDir || vaultName || "";
+    this.remoteBaseDir = this.webdisConfig.remoteBaseDir || "Obsidian";
     this.saveUpdatedConfigFunc = saveUpdatedConfigFunc;
   }
 

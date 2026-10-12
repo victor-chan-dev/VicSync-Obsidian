@@ -557,7 +557,7 @@ export class FakeFsOnedrive extends FakeFs {
     super();
     this.kind = "onedrive";
     this.onedriveConfig = onedriveConfig;
-    this.remoteBaseDir = this.onedriveConfig.remoteBaseDir || vaultName || "";
+    this.remoteBaseDir = this.onedriveConfig.remoteBaseDir || "Obsidian";
     this.vaultFolderExists = false;
     this.saveUpdatedConfigFunc = saveUpdatedConfigFunc;
     this.authGetter = new MyAuthProvider(onedriveConfig, saveUpdatedConfigFunc);

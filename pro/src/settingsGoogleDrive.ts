@@ -236,7 +236,7 @@ export const generateGoogleDriveSettingsPart = (
   googleDriveLongDescDiv.createEl("p", {
     text: t("settings_googledrive_folder", {
       remoteBaseDir:
-        plugin.settings.googledrive.remoteBaseDir || app.vault.getName(),
+        plugin.settings.googledrive.remoteBaseDir || "Obsidian",
     }),
   });
 
@@ -328,16 +328,16 @@ export const generateGoogleDriveSettingsPart = (
   googleDriveRevokeAuthDiv.style.display = plugin.settings.googledrive.refreshToken === "" ? "none" : "";
 
   let newgoogleDriveRemoteBaseDir =
-    plugin.settings.googledrive.remoteBaseDir || "";
+    plugin.settings.googledrive.remoteBaseDir || "Obsidian";
   new Setting(googleDriveAllowedToUsedDiv)
     .setName(t("settings_remotebasedir"))
     .setDesc(t("settings_remotebasedir_desc"))
     .addText((text) =>
       text
-        .setPlaceholder(app.vault.getName())
+        .setPlaceholder("Obsidian")
         .setValue(newgoogleDriveRemoteBaseDir)
         .onChange((value) => {
-          newgoogleDriveRemoteBaseDir = value.trim();
+          newgoogleDriveRemoteBaseDir = value.trim() || "Obsidian";
         })
     )
     .addButton((button) => {

@@ -254,7 +254,7 @@ export class FakeFsYandexDisk extends FakeFs {
     super();
     this.kind = "yandexdisk";
     this.yandexDiskConfig = yandexDiskConfig;
-    this.remoteBaseDir = this.yandexDiskConfig.remoteBaseDir || vaultName || "";
+    this.remoteBaseDir = this.yandexDiskConfig.remoteBaseDir || "Obsidian";
     this.vaultFolderExists = false;
     this.saveUpdatedConfigFunc = saveUpdatedConfigFunc;
   }

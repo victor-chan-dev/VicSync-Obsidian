@@ -26,6 +26,7 @@ export const DEFAULT_GOOGLEDRIVE_CONFIG: GoogleDriveConfig = {
   accessTokenExpiresAtTimeMs: 0,
   credentialsShouldBeDeletedAtTimeMs: 0,
   scope: "https://www.googleapis.com/auth/drive",
+  remoteBaseDir: "Obsidian",
   kind: "googledrive",
 };
 
@@ -189,7 +190,7 @@ export class FakeFsGoogleDrive extends FakeFs {
     this.kind = "googledrive";
     this.googleDriveConfig = googleDriveConfig;
     this.remoteBaseDir =
-      this.googleDriveConfig.remoteBaseDir || vaultName || "";
+      this.googleDriveConfig.remoteBaseDir || "Obsidian";
     this.vaultFolderExists = false;
     this.saveUpdatedConfigFunc = saveUpdatedConfigFunc;
     this.keyToGDEntity = {};

@@ -400,7 +400,7 @@ export class FakeFsOnedriveFull extends FakeFs {
     this.kind = "onedrivefull";
     this.onedriveFullConfig = onedriveFullConfig;
     this.remoteBaseDir =
-      this.onedriveFullConfig.remoteBaseDir || vaultName || "";
+      this.onedriveFullConfig.remoteBaseDir || "Obsidian";
     this.vaultFolderExists = false;
     this.saveUpdatedConfigFunc = saveUpdatedConfigFunc;
     this.authGetter = new MyAuthProvider(

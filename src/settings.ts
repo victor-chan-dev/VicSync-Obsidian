@@ -229,6 +229,7 @@ export class ChangeRemoteBaseDirModal extends Modal {
 
     if (
       this.newRemoteBaseDir === "" ||
+      this.newRemoteBaseDir === "Obsidian" ||
       this.newRemoteBaseDir === this.app.vault.getName()
     ) {
       new Setting(contentEl)
@@ -237,8 +238,8 @@ export class ChangeRemoteBaseDirModal extends Modal {
             t("modal_remotebasedir_secondconfirm_vaultname")
           );
           button.onClick(async () => {
-            // in the settings, the value is reset to the special case ""
-            this.plugin.settings[this.service].remoteBaseDir = "";
+            // in the settings, the value is reset to default "Obsidian"
+            this.plugin.settings[this.service].remoteBaseDir = "Obsidian";
             await this.plugin.saveSettings();
             new Notice(t("modal_remotebasedir_notice"));
             this.close();

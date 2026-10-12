@@ -315,7 +315,7 @@ export class FakeFsKoofr extends FakeFs {
     super();
     this.kind = "koofr";
     this.koofrConfig = koofrConfig;
-    this.remoteBaseDir = this.koofrConfig.remoteBaseDir || vaultName || "";
+    this.remoteBaseDir = this.koofrConfig.remoteBaseDir || "Obsidian";
     this.vaultFolderExists = false;
     this.saveUpdatedConfigFunc = saveUpdatedConfigFunc;
     this.placeID = this.koofrConfig.mountID;

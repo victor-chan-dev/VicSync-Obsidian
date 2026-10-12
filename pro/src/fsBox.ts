@@ -308,7 +308,7 @@ export class FakeFsBox extends FakeFs {
     super();
     this.kind = "box";
     this.boxConfig = boxConfig;
-    this.remoteBaseDir = this.boxConfig.remoteBaseDir || vaultName || "";
+    this.remoteBaseDir = this.boxConfig.remoteBaseDir || "Obsidian";
     this.vaultFolderExists = false;
     this.saveUpdatedConfigFunc = saveUpdatedConfigFunc;
     this.keyToBoxEntity = {};

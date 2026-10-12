@@ -370,7 +370,7 @@ export class FakeFsDropbox extends FakeFs {
     super();
     this.kind = "dropbox";
     this.dropboxConfig = dropboxConfig;
-    this.remoteBaseDir = this.dropboxConfig.remoteBaseDir || vaultName || "";
+    this.remoteBaseDir = this.dropboxConfig.remoteBaseDir || "Obsidian";
     this.saveUpdatedConfigFunc = saveUpdatedConfigFunc;
     this.vaultFolderExists = false;
     this.foldersCreatedBefore = new Set();

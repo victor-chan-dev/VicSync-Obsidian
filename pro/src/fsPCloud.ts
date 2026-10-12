@@ -312,7 +312,7 @@ export class FakeFsPCloud extends FakeFs {
     super();
     this.kind = "pcloud";
     this.pCloudConfig = pCloudConfig;
-    this.remoteBaseDir = this.pCloudConfig.remoteBaseDir || vaultName || "";
+    this.remoteBaseDir = this.pCloudConfig.remoteBaseDir || "Obsidian";
     this.vaultFolderExists = false;
     this.saveUpdatedConfigFunc = saveUpdatedConfigFunc;
     this.keyToPCloudEntity = {};

@@ -274,7 +274,7 @@ export class FakeFsWebdav extends FakeFs {
     this.kind = "webdav";
     this.webdavConfig = cloneDeep(webdavConfig);
     this.webdavConfig.address = tryEncodeURI(this.webdavConfig.address);
-    this.remoteBaseDir = this.webdavConfig.remoteBaseDir || vaultName || "";
+    this.remoteBaseDir = this.webdavConfig.remoteBaseDir || "Obsidian";
     this.vaultFolderExists = false;
     this.saveUpdatedConfigFunc = saveUpdatedConfigFunc;
 
