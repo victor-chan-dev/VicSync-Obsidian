@@ -23,6 +23,48 @@ This is yet another unofficial sync plugin for Obsidian. If you like it or find 
 
 **ALWAYS, ALWAYS, backup your vault before using this plugin.**
 
+## Installation
+
+### Via BRAT (Obsidian Beta Reviewers Auto-update Tester)
+1. Install and enable the [BRAT](https://github.com/TfTHacker/obsidian42-brat) plugin in Obsidian.
+2. In Obsidian Settings, go to **BRAT** > **Add Beta plugin**.
+3. Enter the repository path:
+   ```text
+   victor-chan-dev/VicSync-Obsidian
+   ```
+4. Click **Add Plugin** and enable **VicSync** in Community Plugins.
+
+### Manual Installation
+1. Go to the [Releases](https://github.com/victor-chan-dev/VicSync-Obsidian/releases) page.
+2. Download `main.js`, `manifest.json`, and `styles.css`.
+3. Create a folder named `vicsync` inside your Obsidian vault: `.obsidian/plugins/vicsync/`.
+4. Copy the downloaded files into that folder and reload Obsidian plugins.
+
+## Development & Automated Releases
+
+### Local Build
+To compile the plugin bundle using `esbuild` with your local `.env` variables (e.g. Google Drive OAuth credentials baked in):
+```bash
+npm run build2
+```
+
+### Automated Release Script
+The repository includes an automated release script (`scripts/release.mjs`) that builds the plugin bundle, tags the commit, pushes to GitHub, creates/updates the GitHub Release, and uploads all three required assets (`main.js`, `manifest.json`, `styles.css`).
+
+- **Update current release** (re-build and re-upload assets for the current version):
+  ```bash
+  npm run release
+  ```
+
+- **Bump version and publish a new release**:
+  ```bash
+  npm run release patch   # e.g., 0.5.25 -> 0.5.26
+  npm run release minor   # e.g., 0.5.25 -> 0.6.0
+  npm run release 0.5.26  # Explicit version number
+  ```
+
+> **Note:** The release script automatically uses your existing git credentials from macOS keychain (`git credential fill`) or the `GITHUB_TOKEN` environment variable.
+
 ## Features
 
 - Supports:

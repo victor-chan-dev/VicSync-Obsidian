@@ -18,6 +18,46 @@
 
 **在使用此插件之前，一定，一定要记得备份你的 vault。**
 
+## 安装方式
+
+### 通过 BRAT 插件自动安装更新
+1. 在 Obsidian 中安装并启用 [BRAT](https://github.com/TfTHacker/obsidian42-brat) 插件。
+2. 打开 Obsidian 设置，进入 **BRAT** > **Add Beta plugin**。
+3. 输入仓库路径：
+   ```text
+   victor-chan-dev/VicSync-Obsidian
+   ```
+4. 点击 **Add Plugin** 并在第三方插件列表中启用 **VicSync**。
+
+### 手动安装
+1. 前往 [Releases](https://github.com/victor-chan-dev/VicSync-Obsidian/releases) 页面。
+2. 下载 `main.js`、`manifest.json` 和 `styles.css`。
+3. 在你的 Obsidian vault 中创建文件夹：`.obsidian/plugins/vicsync/`。
+4. 将下载的文件放入该文件夹，并重新加载 Obsidian 插件。
+
+## 开发与发布自动化
+
+### 本地构建
+使用 `esbuild` 结合本地 `.env` 环境变量打包编译插件：
+```bash
+npm run build2
+```
+
+### 自动化发布脚本
+仓库内置了发布脚本（`scripts/release.mjs`），可自动打包、Git 打标签、推送 GitHub、创建/更新 Release 并上传附件（`main.js`, `manifest.json`, `styles.css`）：
+
+- **更新当前版本的 Release 资源**：
+  ```bash
+  npm run release
+  ```
+
+- **升级版本并发布新 Release**：
+  ```bash
+  npm run release patch   # 例如：0.5.25 -> 0.5.26
+  npm run release minor   # 例如：0.5.25 -> 0.6.0
+  npm run release 0.5.26  # 指定版本号
+  ```
+
 ## 功能
 
 - 支持：
