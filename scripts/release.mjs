@@ -131,7 +131,7 @@ function buildPlugin() {
 function commitAndTag(version) {
   log(`Committing and creating git tag "${version}"...`);
   try {
-    execSync("git add manifest.json manifest-beta.json package.json versions.json", { stdio: "inherit" });
+    execSync("git add -u && git add manifest.json manifest-beta.json package.json versions.json", { stdio: "inherit" });
     const status = execSync("git status --porcelain").toString();
     if (status.includes("manifest.json") || status.includes("package.json")) {
       execSync(`git commit -m "chore: release ${version}"`, { stdio: "inherit" });
