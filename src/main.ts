@@ -583,7 +583,7 @@ export default class RemotelySavePlugin extends Plugin {
     // must AFTER preparing DB
     this.enableAutoClearSyncPlanHist();
 
-    this.registerObsidianProtocolHandler(COMMAND_URI, async (inputParams) => {
+    const handleSettingsUri = async (inputParams: any) => {
       // console.debug(inputParams);
       const parsed = importQrCodeUri(inputParams, this.app.vault.getName());
       if (parsed.status === "error") {
@@ -599,7 +599,9 @@ export default class RemotelySavePlugin extends Plugin {
           })
         );
       }
-    });
+    };
+    this.registerObsidianProtocolHandler(COMMAND_URI, handleSettingsUri);
+    this.registerObsidianProtocolHandler("remotely-save", handleSettingsUri);
 
     this.registerObsidianProtocolHandler(
       COMMAND_CALLBACK,

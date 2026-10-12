@@ -1,11 +1,11 @@
 {
-  "id": "v-remotely-save",
-  "name": "v-remotely-save",
+  "id": "vicsync",
+  "name": "VicSync",
   "version": "0.5.25",
   "minAppVersion": "0.13.21",
-  "description": "Yet another unofficial plugin allowing users to synchronize notes between local device and the cloud service.",
-  "author": "fyears",
-  "authorUrl": "https://github.com/fyears",
+  "description": "Personal sync plugin for Obsidian supporting Google Drive and S3. Forked from Remotely Save (fyears).",
+  "author": "Victor Chan (forked from fyears)",
+  "authorUrl": "https://github.com/victor-chan-dev/VicSync-Obsidian",
   "isDesktopOnly": false,
   "fundingUrl": "https://remotelysave.com"
 }

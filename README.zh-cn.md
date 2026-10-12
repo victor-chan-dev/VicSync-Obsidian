@@ -1,4 +1,6 @@
-# Remotely Save
+# VicSync
+
+> **致谢与声明：** VicSync 是基于 [fyears](https://github.com/fyears) 开发的 [Remotely Save](https://github.com/remotely-save/remotely-save) 插件的个人 Fork 分支。核心同步算法与架构的所有荣誉均归原作者及社区贡献者所有。
 
 [English](./README.md) | 中文
 

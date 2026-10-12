@@ -1,4 +1,11 @@
-# Remotely Save
+# VicSync
+
+> **Attribution:** VicSync is a personal fork of the [Remotely Save](https://github.com/remotely-save/remotely-save) plugin created by [fyears](https://github.com/fyears). All credit for the underlying sync engine and architecture belongs to the original author and contributors.
+>
+> **Key features in this fork:**
+> - Directly enabled Google Drive sync using personal Google Cloud OAuth credentials without third-party server proxies or subscriptions.
+> - Streamlined configuration interface tailored specifically for Amazon S3 and Google Drive.
+> - Fixed Google Drive error reporting and prevented arbitrary 60-day credential deletion.
 
 English | [中文](./README.zh-cn.md)
 

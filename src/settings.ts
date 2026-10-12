@@ -839,7 +839,8 @@ export class RemotelySaveSettingTab extends PluginSettingTab {
       return this.plugin.i18n.t(x, vars);
     };
 
-    containerEl.createEl("h1", { text: "v-remotely-save" });
+    containerEl.createEl("h1", { text: "VicSync" });
+    containerEl.createEl("p", { text: "Personal sync for Obsidian (Forked from Remotely Save)", cls: "setting-item-description" });
 
     //////////////////////////////////////////////////
     // below for service chooser (part 1/2)
@@ -2585,7 +2586,7 @@ export class RemotelySaveSettingTab extends PluginSettingTab {
       .setDesc(t("settings_import_desc"))
       .addText((text) =>
         text
-          .setPlaceholder("obsidian://remotely-save?func=settings&...")
+          .setPlaceholder("obsidian://vicsync?func=settings&...")
           .setValue("")
           .onChange((val) => {
             importSettingVal = val;
