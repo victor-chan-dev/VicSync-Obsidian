@@ -217,6 +217,7 @@ export const generateGoogleDriveSettingsPart = (
     "googledrive-hide",
     plugin.settings.serviceType !== "googledrive"
   );
+  googleDriveDiv.style.display = plugin.settings.serviceType === "googledrive" ? "" : "none";
   googleDriveDiv.createEl("h2", { text: t("settings_googledrive") });
 
   const googleDriveLongDescDiv = googleDriveDiv.createEl("div", {
@@ -261,6 +262,7 @@ export const generateGoogleDriveSettingsPart = (
     googleDriveNotShowUpHintSetting.settingEl.addClass(
       "googledrive-allow-to-use-hide"
     );
+    googleDriveNotShowUpHintSetting.settingEl.style.display = "none";
   } else {
     googleDriveAllowedToUsedDiv.addClass("googledrive-allow-to-use-hide");
     googleDriveNotShowUpHintSetting.settingEl.removeClass(
@@ -322,6 +324,8 @@ export const generateGoogleDriveSettingsPart = (
     "googledrive-revoke-auth-button-hide",
     plugin.settings.googledrive.refreshToken === ""
   );
+  googleDriveAuthDiv.style.display = plugin.settings.googledrive.refreshToken !== "" ? "none" : "";
+  googleDriveRevokeAuthDiv.style.display = plugin.settings.googledrive.refreshToken === "" ? "none" : "";
 
   let newgoogleDriveRemoteBaseDir =
     plugin.settings.googledrive.remoteBaseDir || "";
