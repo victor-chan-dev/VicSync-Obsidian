@@ -40,7 +40,7 @@ class GoogleDriveAuthModal extends Modal {
     const div2 = contentEl.createDiv();
     div2.createDiv({
       text: stringToFragment(
-        "<p>To authenticate, generate a <b>refresh token</b> from Google using your OAuth Client ID & Secret (e.g. via <a href='https://developers.google.com/oauthplayground'>Google OAuth Playground</a> with scope <code>https://www.googleapis.com/auth/drive.file</code>) and paste it below.</p>"
+        "<p>To authenticate, generate a <b>refresh token</b> from Google using your OAuth Client ID & Secret (e.g. via <a href='https://developers.google.com/oauthplayground'>Google OAuth Playground</a> with scope <code>https://www.googleapis.com/auth/drive</code>) and paste it below.</p>"
       ),
     });
     div2.createEl(

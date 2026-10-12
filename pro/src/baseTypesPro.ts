@@ -68,7 +68,7 @@ export interface GoogleDriveConfig {
   refreshToken: string;
   remoteBaseDir?: string;
   credentialsShouldBeDeletedAtTimeMs?: number;
-  scope: "https://www.googleapis.com/auth/drive.file";
+  scope: "https://www.googleapis.com/auth/drive";
   kind: "googledrive";
 }
 

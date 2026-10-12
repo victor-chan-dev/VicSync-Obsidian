@@ -25,7 +25,7 @@ export const DEFAULT_GOOGLEDRIVE_CONFIG: GoogleDriveConfig = {
   accessTokenExpiresInMs: 0,
   accessTokenExpiresAtTimeMs: 0,
   credentialsShouldBeDeletedAtTimeMs: 0,
-  scope: "https://www.googleapis.com/auth/drive.file",
+  scope: "https://www.googleapis.com/auth/drive",
   kind: "googledrive",
 };
 
