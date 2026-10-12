@@ -9,7 +9,8 @@
     "dev": "webpack --mode development --watch",
     "format": "npx @biomejs/biome check --write .",
     "clean": "npx rimraf main.js",
-    "test": "mocha --import=tsx 'tests/**/*.ts' 'pro/tests/**/*.ts'"
+    "test": "mocha --import=tsx 'tests/**/*.ts' 'pro/tests/**/*.ts'",
+    "release": "node scripts/release.mjs"
   },
   "browser": {
     "path": "path-browserify",
