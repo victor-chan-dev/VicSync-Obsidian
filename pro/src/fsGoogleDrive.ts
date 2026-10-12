@@ -215,14 +215,18 @@ export class FakeFsGoogleDrive extends FakeFs {
         },
       });
 
-      const k1: { files: File[] } = await k.json();
-      // console.debug(k1);
-      if (k1.files.length > 0) {
-        // yeah we find it
+      if (k.status !== 200) {
+        const errJson = await k.json().catch(() => null);
+        const errMsg = errJson?.error?.message || `HTTP ${k.status}`;
+        console.error("Google Drive query failed:", errJson || errMsg);
+        throw Error(`Google Drive API error (${k.status}): ${errMsg}`);
+      }
+
+      const k1: { files?: File[] } = await k.json();
+      if (k1.files && k1.files.length > 0) {
         this.baseDirID = k1.files[0].id!;
         this.vaultFolderExists = true;
       } else {
-        // wait, we need to create the folder!
         console.debug(`we need to create the base dir ${this.remoteBaseDir}`);
         const meta: any = {
           mimeType: FOLDER_MIME_TYPE,
@@ -236,15 +240,16 @@ export class FakeFsGoogleDrive extends FakeFs {
           },
           body: JSON.stringify(meta),
         });
-        const res2: File = await res.json();
-        if (res.status === 200) {
+        if (res.status === 200 || res.status === 201) {
+          const res2: File = await res.json();
           console.debug(`succeed to create the base dir ${this.remoteBaseDir}`);
           this.baseDirID = res2.id!;
           this.vaultFolderExists = true;
         } else {
-          throw Error(
-            `cannot create base dir ${this.remoteBaseDir} in init func.`
-          );
+          const errJson = await res.json().catch(() => null);
+          const errMsg = errJson?.error?.message || `HTTP ${res.status}`;
+          console.error("Google Drive create folder failed:", errJson || errMsg);
+          throw Error(`cannot create base dir ${this.remoteBaseDir}: ${errMsg}`);
         }
       }
     }
@@ -363,7 +368,7 @@ export class FakeFsGoogleDrive extends FakeFs {
 
       const k1 = await k.json();
       // console.debug(k1);
-      for (const file of k1.files as File[]) {
+      for (const file of (k1.files || []) as File[]) {
         const entity = fromFileToGDEntity(file, parentID, parentFolderPath);
         this.keyToGDEntity[entity.keyRaw] = entity; // build cache
         filesOneLevel.push(entity);
