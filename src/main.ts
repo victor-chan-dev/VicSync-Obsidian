@@ -6,6 +6,7 @@ import { FileText, RefreshCcw, RotateCcw, createElement } from "lucide";
 import {
   Events,
   FileSystemAdapter,
+  Menu,
   type Modal,
   Notice,
   Platform,
@@ -65,6 +66,7 @@ import {
 import { syncer } from "../pro/src/sync";
 import type {
   RemotelySavePluginSettings,
+  SyncDirectionType,
   SyncTriggerSourceType,
 } from "./baseTypes";
 import {
@@ -231,7 +233,10 @@ export default class RemotelySavePlugin extends Plugin {
   syncEvent?: Events;
   appContainerObserver?: MutationObserver;
 
-  async syncRun(triggerSource: SyncTriggerSourceType = "manual") {
+  async syncRun(
+    triggerSource: SyncTriggerSourceType = "manual",
+    overrideSyncDirection?: SyncDirectionType
+  ) {
     let profiler: Profiler | undefined = undefined;
     if (this.settings.profiler?.enable ?? false) {
       profiler = new Profiler(
@@ -306,23 +311,28 @@ export default class RemotelySavePlugin extends Plugin {
 
           break;
 
-        case 1:
+        case 1: {
+          const directionDesc =
+            overrideSyncDirection === "incremental_pull_and_delete_only"
+              ? `, ${t("setting_syncdirection_incremental_pull_and_delete_only_desc")}`
+              : "";
           if (this.settings.currLogLevel === "info") {
             getNotice(
               s,
               t("syncrun_shortstep1", {
-                serviceType: this.settings.serviceType,
+                serviceType: `${this.settings.serviceType}${directionDesc}`,
               })
             );
           } else {
             getNotice(
               s,
               t("syncrun_step1", {
-                serviceType: this.settings.serviceType,
+                serviceType: `${this.settings.serviceType}${directionDesc}`,
               })
             );
           }
           break;
+        }
 
         case 2:
           if (this.settings.currLogLevel === "info") {
@@ -485,6 +495,11 @@ export default class RemotelySavePlugin extends Plugin {
 
     const configSaver = async () => await this.saveSettings();
 
+    const effectiveSettings: RemotelySavePluginSettings =
+      overrideSyncDirection !== undefined
+        ? { ...this.settings, syncDirection: overrideSyncDirection }
+        : this.settings;
+
     await syncer(
       fsLocal,
       fsRemote,
@@ -495,7 +510,7 @@ export default class RemotelySavePlugin extends Plugin {
       profileID,
       this.vaultRandomID,
       this.app.vault.configDir,
-      this.settings,
+      effectiveSettings,
       this.manifest.version,
       configSaver,
       getProtectError,
@@ -1176,6 +1191,45 @@ export default class RemotelySavePlugin extends Plugin {
       async () => this.syncRun("manual")
     );
 
+    this.syncRibbon.addEventListener("contextmenu", (event: MouseEvent) => {
+      event.preventDefault();
+      const menu = new Menu();
+      menu.addItem((item) => {
+        item
+          .setTitle(t("command_startsync"))
+          .setIcon(iconNameSyncWait)
+          .onClick(async () => {
+            await this.syncRun("manual");
+          });
+      });
+      menu.addItem((item) => {
+        item
+          .setTitle(t("command_startsync_incremental_pull_and_delete"))
+          .setIcon(iconNameSyncWait)
+          .onClick(async () => {
+            await this.syncRun("manual", "incremental_pull_and_delete_only");
+          });
+      });
+      menu.addSeparator();
+      menu.addItem((item) => {
+        item
+          .setTitle(t("command_drynrun"))
+          .setIcon(iconNameSyncWait)
+          .onClick(async () => {
+            await this.syncRun("dry");
+          });
+      });
+      menu.addItem((item) => {
+        item
+          .setTitle(t("command_startsync_incremental_pull_and_delete_dry_run"))
+          .setIcon(iconNameSyncWait)
+          .onClick(async () => {
+            await this.syncRun("dry", "incremental_pull_and_delete_only");
+          });
+      });
+      menu.showAtMouseEvent(event);
+    });
+
     this.enableMobileStatusBarIfSet();
 
     // Create Status Bar Item
@@ -1221,11 +1275,29 @@ export default class RemotelySavePlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "start-sync-incremental-pull-and-delete",
+      name: t("command_startsync_incremental_pull_and_delete"),
+      icon: iconNameSyncWait,
+      callback: async () => {
+        this.syncRun("manual", "incremental_pull_and_delete_only");
+      },
+    });
+
+    this.addCommand({
       id: "start-sync-dry-run",
       name: t("command_drynrun"),
       icon: iconNameSyncWait,
       callback: async () => {
         this.syncRun("dry");
+      },
+    });
+
+    this.addCommand({
+      id: "start-sync-incremental-pull-and-delete-dry-run",
+      name: t("command_startsync_incremental_pull_and_delete_dry_run"),
+      icon: iconNameSyncWait,
+      callback: async () => {
+        this.syncRun("dry", "incremental_pull_and_delete_only");
       },
     });
 
@@ -1586,7 +1658,7 @@ export default class RemotelySavePlugin extends Plugin {
       needSave = true;
     }
 
-    let googleDriveExpired = false;
+    const googleDriveExpired = false;
     // Disabled forced expiration for Google Drive credentials
 
     let boxExpired = false;
