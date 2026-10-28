@@ -189,8 +189,11 @@ export class FakeFsGoogleDrive extends FakeFs {
     super();
     this.kind = "googledrive";
     this.googleDriveConfig = googleDriveConfig;
-    this.remoteBaseDir =
-      this.googleDriveConfig.remoteBaseDir || "Obsidian";
+    const rawBaseDir = this.googleDriveConfig.remoteBaseDir || "Obsidian";
+    this.remoteBaseDir = rawBaseDir.trim().replace(/^\/+|\/+$/g, "");
+    if (this.remoteBaseDir === "") {
+      this.remoteBaseDir = "Obsidian";
+    }
     this.vaultFolderExists = false;
     this.saveUpdatedConfigFunc = saveUpdatedConfigFunc;
     this.keyToGDEntity = {};

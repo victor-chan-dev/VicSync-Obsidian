@@ -70,6 +70,10 @@ export async function cleanSyncDown(
   notifyFunc?.("Listing remote files...");
   const remoteEntityList = await fsEncrypt.walk();
 
+  console.info(
+    `[CleanSyncDown] Remote walk completed: ${remoteEntityList.length} total entries found (Service: ${settings.serviceType}, BaseDir: ${(fsEncrypt.innerFs as any)?.remoteBaseDir || "default"}).`
+  );
+
   // Filter valid files (excluding directories and internal meta file)
   const remoteFiles = remoteEntityList.filter((e) => {
     const k = e.keyRaw;
@@ -84,8 +88,10 @@ export async function cleanSyncDown(
 
   // Critical safeguard: Never wipe local vault if remote is empty!
   if (remoteFiles.length === 0) {
+    const service = settings.serviceType;
+    const baseDir = (fsEncrypt.innerFs as any)?.remoteBaseDir || "Obsidian";
     throw new Error(
-      "Remote storage has 0 files! Aborting Clean Sync Down to prevent accidental data loss."
+      `Remote storage has 0 files! (Service: "${service}", Base Directory: "${baseDir}"). Please verify that you are logged into the correct Google account and that the Base Directory in VicSync settings matches your vault folder.`
     );
   }
 

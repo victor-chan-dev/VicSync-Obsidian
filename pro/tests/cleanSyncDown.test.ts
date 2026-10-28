@@ -100,7 +100,7 @@ describe("CleanSyncDown", () => {
         });
       },
       {
-        message: /Remote storage has 0 files! Aborting Clean Sync Down/,
+        message: /Remote storage has 0 files!/,
       }
     );
 
