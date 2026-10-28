@@ -525,12 +525,133 @@ const ensembleMixedEnties = async (
   profiler?.insert("ensembleMixedEnties: finish parsing all skip items");
   profiler?.insertSize("sizeof finalMappings", finalMappings);
 
+  detectRemoteMoves(finalMappings, profiler);
+
   // console.debug("in the end of ensembleMixedEnties, finalMappings is:");
   // console.debug(finalMappings);
 
   profiler?.insert("ensembleMixedEnties: exit");
   profiler?.removeIndent();
   return finalMappings;
+};
+
+/**
+ * Detects when a remote file was moved/renamed (e.g. in Google Drive).
+ * Matches candidate remote deletions with candidate remote creations using persistent ID or Hash.
+ */
+export const detectRemoteMoves = (
+  finalMappings: Record<string, MixedEntity>,
+  profiler?: Profiler
+) => {
+  profiler?.addIndent();
+  profiler?.insert("detectRemoteMoves: enter");
+
+  const candidateDeletions: MixedEntity[] = [];
+  const candidateCreations: MixedEntity[] = [];
+
+  for (const key of Object.keys(finalMappings)) {
+    if (key.endsWith("/")) {
+      continue;
+    }
+    const entry = finalMappings[key];
+    if (entry.prevSync !== undefined && entry.remote === undefined) {
+      candidateDeletions.push(entry);
+    } else if (entry.remote !== undefined && entry.prevSync === undefined) {
+      candidateCreations.push(entry);
+    }
+  }
+
+  if (candidateDeletions.length === 0 || candidateCreations.length === 0) {
+    profiler?.insert("detectRemoteMoves: no candidate pairs");
+    profiler?.removeIndent();
+    return;
+  }
+
+  const matchedCreations = new Set<string>();
+
+  for (const del of candidateDeletions) {
+    const prev = del.prevSync!;
+    const prevId = prev.id ?? (prev as any).id;
+    const prevHash = prev.hash;
+    const prevSize = prev.sizeEnc ?? prev.sizeRaw;
+
+    let matchedCreation: MixedEntity | undefined = undefined;
+
+    for (const cre of candidateCreations) {
+      if (matchedCreations.has(cre.key)) {
+        continue;
+      }
+      const rem = cre.remote!;
+      const remId = rem.id ?? (rem as any).id;
+      const remHash = rem.hash;
+      const remSize = rem.sizeEnc ?? rem.sizeRaw;
+
+      // 1. Match by persistent Google Drive ID (highest confidence)
+      if (
+        prevId !== undefined &&
+        remId !== undefined &&
+        prevId !== "" &&
+        prevId === remId
+      ) {
+        matchedCreation = cre;
+        console.debug(
+          `Detected remote move via Google Drive ID (${prevId}): "${del.key}" -> "${cre.key}"`
+        );
+        break;
+      }
+
+      // 2. Fallback: Match by Hash & Size
+      if (
+        prevHash !== undefined &&
+        remHash !== undefined &&
+        prevHash !== "" &&
+        prevHash === remHash &&
+        prevSize !== undefined &&
+        remSize !== undefined &&
+        prevSize === remSize &&
+        prevSize > 0
+      ) {
+        matchedCreation = cre;
+        console.debug(
+          `Detected remote move via Hash (${prevHash}): "${del.key}" -> "${cre.key}"`
+        );
+        break;
+      }
+    }
+
+    if (matchedCreation !== undefined) {
+      matchedCreations.add(matchedCreation.key);
+
+      if (del.local !== undefined && matchedCreation.local === undefined) {
+        // Source exists on local, target does not -> Safe to rename!
+        del.decision = "remote_is_moved_source";
+        del.decisionBranch = 401;
+        del.change = true;
+        del.moveTargetKey = matchedCreation.key;
+
+        matchedCreation.decision = "remote_is_moved_then_rename_local";
+        matchedCreation.decisionBranch = 402;
+        matchedCreation.change = true;
+        matchedCreation.moveSourceKey = del.key;
+        matchedCreation.prevSync = del.prevSync; // pass prevSync for comparison
+      } else if (
+        del.local === undefined &&
+        matchedCreation.local === undefined
+      ) {
+        // Neither exists locally (e.g. was already deleted locally on this device)
+        del.decision = "only_history";
+        del.decisionBranch = 403;
+        del.change = false;
+
+        matchedCreation.decision = "remote_is_created_then_pull";
+        matchedCreation.decisionBranch = 404;
+        matchedCreation.change = true;
+      }
+    }
+  }
+
+  profiler?.insert("detectRemoteMoves: exit");
+  profiler?.removeIndent();
 };
 
 /**
@@ -571,6 +692,14 @@ const getSyncPlanInplace = async (
     const { local, prevSync, remote } = mixedEntry;
 
     // console.debug(`getSyncPlanInplace: key=${key}`)
+
+    if (mixedEntry.decision === "remote_is_moved_source") {
+      continue;
+    }
+    if (mixedEntry.decision === "remote_is_moved_then_rename_local") {
+      keptFolder.add(getParentFolder(key));
+      continue;
+    }
 
     if (key.endsWith("/")) {
       // folder
@@ -1240,6 +1369,7 @@ const splitFourStepsOnEntityMappings = (
   type StepArrayType = MixedEntity[] | undefined | null;
   const onlyMarkSyncedOps: StepArrayType[] = [];
   const folderCreationOps: StepArrayType[] = [];
+  const moveOps: StepArrayType[] = [];
   const deletionOps: StepArrayType[] = [];
   const uploadDownloads: StepArrayType[] = [];
 
@@ -1326,6 +1456,28 @@ const splitFourStepsOnEntityMappings = (
         // only count files here, skip folder
         realModifyDeleteCount += 1;
       }
+    } else if (val.decision === "remote_is_moved_source") {
+      if (
+        onlyMarkSyncedOps.length === 0 ||
+        onlyMarkSyncedOps[0] === undefined ||
+        onlyMarkSyncedOps[0] === null
+      ) {
+        onlyMarkSyncedOps[0] = [val];
+      } else {
+        onlyMarkSyncedOps[0].push(val);
+      }
+      realTotalCount += 1;
+    } else if (val.decision === "remote_is_moved_then_rename_local") {
+      if (
+        moveOps.length === 0 ||
+        moveOps[0] === undefined ||
+        moveOps[0] === null
+      ) {
+        moveOps[0] = [val];
+      } else {
+        moveOps[0].push(val);
+      }
+      realTotalCount += 1;
     } else if (
       val.decision === "local_is_modified_then_push" ||
       val.decision === "remote_is_modified_then_pull" ||
@@ -1368,6 +1520,7 @@ const splitFourStepsOnEntityMappings = (
   return {
     onlyMarkSyncedOps: onlyMarkSyncedOps,
     folderCreationOps: folderCreationOps,
+    moveOps: moveOps,
     deletionOps: deletionOps,
     uploadDownloads: uploadDownloads,
     allFilesCount: allFilesCount,
@@ -1586,6 +1739,101 @@ const dispatchOperationToActualV3 = async (
         );
       }
     }
+  } else if (r.decision === "remote_is_moved_source") {
+    await clearPrevSyncRecordByVaultAndProfile(
+      db,
+      vaultRandomID,
+      profileID,
+      r.key
+    );
+    if (conflictAction === "smart_conflict") {
+      await clearFileContentHistoryByVaultAndProfile(
+        db,
+        vaultRandomID,
+        profileID,
+        r.key
+      );
+    }
+  } else if (r.decision === "remote_is_moved_then_rename_local") {
+    const oldKey = r.moveSourceKey!;
+    const newKey = r.key;
+    const targetParent = getParentFolder(newKey);
+    if (targetParent !== "" && targetParent !== "/") {
+      try {
+        await fsLocal.mkdir(targetParent);
+      } catch (err) {
+        // Parent folder may already exist
+      }
+    }
+    console.info(
+      `remote move detected: renaming local "${oldKey}" -> "${newKey}"`
+    );
+    try {
+      await fsLocal.rename(oldKey, newKey);
+    } catch (err: any) {
+      console.warn(
+        `Could not rename "${oldKey}" to "${newKey}": ${err?.message || err}. Falling back to copy.`
+      );
+      await copyFile(newKey, fsEncrypt, fsLocal);
+      try {
+        await fsLocal.rm(oldKey);
+      } catch (rmErr) {
+        // Ignore rm failure
+      }
+    }
+
+    // If remote was also modified during/after move, download latest
+    const prevEntity = r.prevSync;
+    const remoteWasModified =
+      prevEntity !== undefined &&
+      (r.remote?.sizeEnc !== prevEntity.sizeEnc ||
+        (r.remote?.hash !== undefined &&
+          prevEntity.hash !== undefined &&
+          r.remote.hash !== prevEntity.hash));
+
+    if (remoteWasModified) {
+      console.info(
+        `remote file was also modified during/after move, downloading latest: "${newKey}"`
+      );
+      await copyFile(newKey, fsEncrypt, fsLocal);
+    }
+
+    await upsertPrevSyncRecordByVaultAndProfile(
+      db,
+      vaultRandomID,
+      profileID,
+      r.remote!
+    );
+    await clearPrevSyncRecordByVaultAndProfile(
+      db,
+      vaultRandomID,
+      profileID,
+      oldKey
+    );
+
+    if (conflictAction === "smart_conflict") {
+      try {
+        const content = await fsLocal.readFile(newKey);
+        await upsertFileContentHistoryByVaultAndProfile(
+          db,
+          vaultRandomID,
+          profileID,
+          r.remote!,
+          content
+        );
+        await clearFileContentHistoryByVaultAndProfile(
+          db,
+          vaultRandomID,
+          profileID,
+          oldKey
+        );
+      } catch (err) {
+        console.debug(
+          "Could not update file content history for moved file",
+          err
+        );
+      }
+    }
   } else if (r.decision === "remote_is_deleted_thus_also_delete_local") {
     // remote is deleted, we need to delete local now
     await fsLocal.rm(r.key);
@@ -1735,6 +1983,7 @@ export const doActualSync = async (
   const {
     onlyMarkSyncedOps,
     folderCreationOps,
+    moveOps,
     deletionOps,
     uploadDownloads,
     allFilesCount,
@@ -1743,6 +1992,7 @@ export const doActualSync = async (
   } = splitFourStepsOnEntityMappings(mixedEntityMappings);
   // console.debug(`onlyMarkSyncedOps: ${JSON.stringify(onlyMarkSyncedOps)}`);
   // console.debug(`folderCreationOps: ${JSON.stringify(folderCreationOps)}`);
+  // console.debug(`moveOps: ${JSON.stringify(moveOps)}`);
   // console.debug(`deletionOps: ${JSON.stringify(deletionOps)}`);
   // console.debug(`uploadDownloads: ${JSON.stringify(uploadDownloads)}`);
   console.debug(`allFilesCount: ${allFilesCount}`);
@@ -1758,6 +2008,7 @@ export const doActualSync = async (
     "doActualSync: sizeof folderCreationOps",
     folderCreationOps
   );
+  profiler?.insertSize("doActualSync: sizeof moveOps", moveOps);
   profiler?.insertSize("doActualSync: sizeof realTotalCount", deletionOps);
 
   console.debug(`protectModifyPercentage: ${protectModifyPercentage}`);
@@ -1792,14 +2043,16 @@ export const doActualSync = async (
   const nested = [
     onlyMarkSyncedOps,
     folderCreationOps,
+    moveOps,
     deletionOps,
     uploadDownloads,
   ];
   const logTexts = [
     `1. record the items already being synced`,
     `2. create all folders from shadowest to deepest`,
-    `3. delete files and folders from deepest to shadowest`,
-    `4. upload or download files in parallel, with the desired concurrency=${concurrency}`,
+    `3. rename/move local files for detected remote moves`,
+    `4. delete files and folders from deepest to shadowest`,
+    `5. upload or download files in parallel, with the desired concurrency=${concurrency}`,
   ];
 
   let realCounter = 0;
@@ -1820,7 +2073,8 @@ export const doActualSync = async (
         continue;
       }
 
-      const queue = new PQueue({ concurrency: concurrency, autoStart: true });
+      const currConcurrency = i === 2 ? 1 : concurrency;
+      const queue = new PQueue({ concurrency: currConcurrency, autoStart: true });
       const potentialErrors: Error[] = [];
       let tooManyErrors = false;
 

@@ -246,6 +246,8 @@ export type DecisionTypeForMixedEntity =
   | "remote_is_created_too_large_then_do_nothing"
   | "local_is_deleted_thus_also_delete_remote"
   | "remote_is_deleted_thus_also_delete_local"
+  | "remote_is_moved_source"
+  | "remote_is_moved_then_rename_local"
   | "conflict_created_then_keep_local"
   | "conflict_created_then_keep_remote"
   | "conflict_created_then_smart_conflict"
@@ -267,6 +269,7 @@ export type DecisionTypeForMixedEntity =
  * everything should be flat and primitive, so that we can copy.
  */
 export interface Entity {
+  id?: string;
   key?: string;
   keyEnc?: string;
   keyRaw: string;
@@ -308,6 +311,8 @@ export interface MixedEntity {
   change?: boolean;
 
   sideNotes?: any;
+  moveSourceKey?: string;
+  moveTargetKey?: string;
 }
 
 /**

@@ -199,6 +199,7 @@ export class FakeFsEncrypt extends FakeFs {
         const key = await this._decryptName(innerEntity.keyRaw);
         const size = key.endsWith("/") ? 0 : undefined;
         res.push({
+          id: (innerEntity as any).id,
           key: key,
           keyRaw: innerEntity.keyRaw,
           keyEnc: innerEntity.key!,
@@ -232,6 +233,7 @@ export class FakeFsEncrypt extends FakeFs {
       return copyEntityAndCopyKeyEncSizeEnc(innerEntity);
     } else {
       return {
+        id: (innerEntity as any).id,
         key: key,
         keyRaw: innerEntity.keyRaw,
         keyEnc: innerEntity.key!,
@@ -281,6 +283,7 @@ export class FakeFsEncrypt extends FakeFs {
         ctime ?? now
       );
       return {
+        id: (innerEntity as any).id,
         key: key,
         keyRaw: innerEntity.keyRaw,
         keyEnc: innerEntity.key!,
@@ -331,6 +334,7 @@ export class FakeFsEncrypt extends FakeFs {
         ctime
       );
       return {
+        id: (innerEntity as any).id,
         key: key,
         keyRaw: innerEntity.keyRaw,
         keyEnc: innerEntity.key!,
