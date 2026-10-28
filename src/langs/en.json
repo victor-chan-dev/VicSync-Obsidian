@@ -38,6 +38,7 @@
   "protocol_onedrive_connect_unknown": "Do not know how to deal with the callback: {{params}}",
   "command_startsync": "start sync",
   "command_startsync_incremental_pull_and_delete": "start sync (incremental pull and delete only)",
+  "command_reset_local_from_cloud": "Reset Local Vault from Cloud (Clean Sync Down)",
   "command_drynrun": "start sync (dry run only)",
   "command_startsync_incremental_pull_and_delete_dry_run": "start sync (incremental pull and delete dry run only)",
   "command_exportsyncplans_1_only_change": "export sync plans (latest 1) (change part)",

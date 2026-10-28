@@ -63,7 +63,9 @@ import {
   sendAuthReq as sendAuthReqYandexDisk,
   setConfigBySuccessfullAuthInplace as setConfigBySuccessfullAuthInplaceYandexDisk,
 } from "../pro/src/fsYandexDisk";
+import { cleanSyncDown } from "../pro/src/cleanSyncDown";
 import { syncer } from "../pro/src/sync";
+import { ResetLocalModal } from "./resetLocalModal";
 import type {
   RemotelySavePluginSettings,
   SyncDirectionType,
@@ -526,6 +528,113 @@ export default class RemotelySavePlugin extends Plugin {
     (profiler as Profiler | undefined)?.clear();
 
     this.syncEvent?.trigger("SYNC_DONE");
+  }
+
+  async cleanSyncDownRun() {
+    if (this.isSyncing) {
+      new Notice("VicSync is already syncing! Please wait for it to finish.");
+      return;
+    }
+
+    this.isSyncing = true;
+    if (this.syncRibbon !== undefined) {
+      setIcon(this.syncRibbon, iconNameSyncRunning);
+      this.syncRibbon.setAttribute(
+        "aria-label",
+        `${this.manifest.name}: clean sync down running...`
+      );
+    }
+    this.updateLastSyncMsg("manual", "syncing", -1, -1);
+
+    let profiler: Profiler | undefined = undefined;
+    if (this.settings.profiler?.enable ?? false) {
+      profiler = new Profiler(
+        undefined,
+        this.settings.profiler?.enablePrinting ?? false,
+        this.settings.profiler?.recordSize ?? false
+      );
+    }
+
+    const fsLocal = new FakeFsLocal(
+      this.app.vault,
+      this.settings.syncConfigDir ?? false,
+      this.settings.syncBookmarks ?? false,
+      this.app.vault.configDir,
+      this.manifest.id,
+      profiler,
+      this.settings.deleteToWhere ?? "system"
+    );
+
+    const fsRemote = getClient(
+      this.settings,
+      this.app.vault.getName(),
+      async () => await this.saveSettings()
+    );
+
+    const fsEncrypt = new FakeFsEncrypt(
+      fsRemote,
+      this.settings.password ?? "",
+      this.settings.encryptionMethod ?? "rclone-base64"
+    );
+
+    const profileID = this.getCurrProfileID();
+    const t = (x: TransItemType, vars?: any) => {
+      return this.i18n.t(x, vars);
+    };
+
+    new Notice("VicSync: Starting Clean Sync Down from cloud...", 5000);
+
+    try {
+      const result = await cleanSyncDown({
+        fsLocal,
+        fsEncrypt,
+        db: this.db,
+        vaultRandomID: this.vaultRandomID,
+        profileID,
+        configDir: this.app.vault.configDir,
+        settings: this.settings,
+        notifyFunc: (msg: string) => {
+          console.info(`[CleanSyncDown] ${msg}`);
+        },
+        callbackProgress: (completed, total, key) => {
+          this.setCurrSyncMsg(
+            t,
+            "manual",
+            completed,
+            total,
+            key,
+            "clean_sync_down",
+            "manual"
+          );
+        },
+      });
+
+      const ts = Date.now();
+      await upsertLastSuccessSyncTimeByVault(this.db, this.vaultRandomID, ts);
+      this.updateLastSyncMsg("manual", "not_syncing", ts, null);
+      new Notice(
+        `VicSync: Clean Sync Down complete! Moved ${result.deletedLocalCount} local items to Trash and downloaded ${result.downloadedCount} files from cloud.`,
+        10000
+      );
+    } catch (err: any) {
+      console.error("[CleanSyncDown Error]", err);
+      const ts = Date.now();
+      await upsertLastFailedSyncTimeByVault(this.db, this.vaultRandomID, ts);
+      this.updateLastSyncMsg("manual", "not_syncing", null, ts);
+      new Notice(
+        `VicSync Clean Sync Down failed: ${err?.message || err}`,
+        10000
+      );
+    } finally {
+      this.isSyncing = false;
+      if (this.syncRibbon !== undefined) {
+        setIcon(this.syncRibbon, iconNameSyncWait);
+        this.syncRibbon.setAttribute("aria-label", this.manifest.name);
+      }
+      fsEncrypt.closeResources();
+      (profiler as Profiler | undefined)?.clear();
+      this.syncEvent?.trigger("SYNC_DONE");
+    }
   }
 
   async onload() {
@@ -1210,6 +1319,16 @@ export default class RemotelySavePlugin extends Plugin {
             await this.syncRun("manual", "incremental_pull_and_delete_only");
           });
       });
+      menu.addItem((item) => {
+        item
+          .setTitle(t("command_reset_local_from_cloud"))
+          .setIcon(iconNameSyncWait)
+          .onClick(() => {
+            new ResetLocalModal(this.app, async () => {
+              await this.cleanSyncDownRun();
+            }).open();
+          });
+      });
       menu.addSeparator();
       menu.addItem((item) => {
         item
@@ -1280,6 +1399,17 @@ export default class RemotelySavePlugin extends Plugin {
       icon: iconNameSyncWait,
       callback: async () => {
         this.syncRun("manual", "incremental_pull_and_delete_only");
+      },
+    });
+
+    this.addCommand({
+      id: "reset-local-from-cloud",
+      name: t("command_reset_local_from_cloud"),
+      icon: iconNameSyncWait,
+      callback: () => {
+        new ResetLocalModal(this.app, async () => {
+          await this.cleanSyncDownRun();
+        }).open();
       },
     });
 

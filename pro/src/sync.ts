@@ -1529,7 +1529,7 @@ const splitFourStepsOnEntityMappings = (
   };
 };
 
-const fullfillMTimeOfRemoteEntityInplace = (
+export const fullfillMTimeOfRemoteEntityInplace = (
   remote: Entity,
   mtimeCli?: number
 ) => {
