@@ -57,3 +57,4 @@ export class ResetLocalModal extends Modal {
     contentEl.empty();
   }
 }
+
