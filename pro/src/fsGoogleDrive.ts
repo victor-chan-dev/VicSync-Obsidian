@@ -371,8 +371,27 @@ export class FakeFsGoogleDrive extends FakeFs {
       // console.debug(k1);
       for (const file of (k1.files || []) as File[]) {
         const entity = fromFileToGDEntity(file, parentID, parentFolderPath);
-        this.keyToGDEntity[entity.keyRaw] = entity; // build cache
-        filesOneLevel.push(entity);
+        const existing = this.keyToGDEntity[entity.keyRaw];
+        if (existing !== undefined) {
+          console.warn(
+            `Duplicate file found in Google Drive: "${entity.keyRaw}". Existing ID=${existing.id} (mtime=${existing.mtimeSvr}), duplicate ID=${entity.id} (mtime=${entity.mtimeSvr})`
+          );
+          // Keep the newer version to resolve the ambiguity
+          if ((entity.mtimeSvr ?? 0) > (existing.mtimeSvr ?? 0)) {
+            this.keyToGDEntity[entity.keyRaw] = entity;
+            const idx = filesOneLevel.findIndex(
+              (f) => f.keyRaw === entity.keyRaw
+            );
+            if (idx !== -1) {
+              filesOneLevel[idx] = entity;
+            } else {
+              filesOneLevel.push(entity);
+            }
+          }
+        } else {
+          this.keyToGDEntity[entity.keyRaw] = entity; // build cache
+          filesOneLevel.push(entity);
+        }
       }
 
       nextPageToken = k1.nextPageToken;
@@ -438,6 +457,10 @@ export class FakeFsGoogleDrive extends FakeFs {
     }
 
     await this._init();
+
+    if (this.keyToGDEntity[key] !== undefined) {
+      return this.keyToGDEntity[key];
+    }
 
     // xxx/ => ["xxx"]
     // xxx/yyy/zzz/ => ["xxx", "xxx/yyy", "xxx/yyy/zzz"]
@@ -531,15 +554,19 @@ export class FakeFsGoogleDrive extends FakeFs {
     }
 
     const fileItself = key.split("/").pop()!;
+    const existingFileID = this.keyToGDEntity[key]?.id;
+    const isUpdate = existingFileID !== undefined && existingFileID !== "";
 
     if (content.byteLength <= 5 * 1024 * 1024) {
       const formData = new FormData();
       const meta: any = {
         name: fileItself,
         modifiedTime: unixTimeToStr(mtime, true),
-        createdTime: unixTimeToStr(ctime, true),
-        parents: [parentID],
       };
+      if (!isUpdate) {
+        meta.createdTime = unixTimeToStr(ctime, true);
+        meta.parents = [parentID];
+      }
       formData.append(
         "metadata",
         new Blob([JSON.stringify(meta)], {
@@ -548,22 +575,25 @@ export class FakeFsGoogleDrive extends FakeFs {
       );
       formData.append("media", new Blob([content], { type: contentType }));
 
-      const res = await fetch(
-        "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=kind,fileExtension,md5Checksum,mimeType,parents,size,spaces,id,name,trashed,createdTime,modifiedTime,quotaBytesUsed,originalFilename,fullFileExtension,sha1Checksum,sha256Checksum",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${await this._getAccessToken()}`,
-          },
-          body: formData,
-        }
-      );
+      const uploadUrl = isUpdate
+        ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileID}?uploadType=multipart&fields=kind,fileExtension,md5Checksum,mimeType,parents,size,spaces,id,name,trashed,createdTime,modifiedTime,quotaBytesUsed,originalFilename,fullFileExtension,sha1Checksum,sha256Checksum`
+        : `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=kind,fileExtension,md5Checksum,mimeType,parents,size,spaces,id,name,trashed,createdTime,modifiedTime,quotaBytesUsed,originalFilename,fullFileExtension,sha1Checksum,sha256Checksum`;
+
+      const res = await fetch(uploadUrl, {
+        method: isUpdate ? "PATCH" : "POST",
+        headers: {
+          Authorization: `Bearer ${await this._getAccessToken()}`,
+        },
+        body: formData,
+      });
       if (res.status !== 200 && res.status !== 201) {
-        throw Error(`create file ${key} failed! meta=${JSON.stringify(meta)}`);
+        throw Error(
+          `${isUpdate ? "update" : "create"} file ${key} failed! status=${res.status}, meta=${JSON.stringify(meta)}`
+        );
       }
       const res2: File = await res.json();
       console.debug(
-        `upload ${key} with ${JSON.stringify(meta)}, res2=${JSON.stringify(
+        `${isUpdate ? "update" : "upload"} ${key} with ${JSON.stringify(meta)}, res2=${JSON.stringify(
           res2
         )}`
       );
@@ -575,9 +605,11 @@ export class FakeFsGoogleDrive extends FakeFs {
       const meta: any = {
         name: fileItself,
         modifiedTime: unixTimeToStr(mtime, true),
-        createdTime: unixTimeToStr(ctime, true),
-        parents: [parentID],
       };
+      if (!isUpdate) {
+        meta.createdTime = unixTimeToStr(ctime, true);
+        meta.parents = [parentID];
+      }
       const bodyStr = JSON.stringify(meta);
       const headers: HeadersInit = {
         Authorization: `Bearer ${await this._getAccessToken()}`,
@@ -586,17 +618,18 @@ export class FakeFsGoogleDrive extends FakeFs {
         "X-Upload-Content-Type": contentType,
         "X-Upload-Content-Length": `${content.byteLength}`,
       };
-      const res = await fetch(
-        "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=kind,fileExtension,md5Checksum,mimeType,parents,size,spaces,id,name,trashed,createdTime,modifiedTime,quotaBytesUsed,originalFilename,fullFileExtension,sha1Checksum,sha256Checksum",
-        {
-          method: "POST",
-          headers: headers,
-          body: bodyStr,
-        }
-      );
+      const uploadInitUrl = isUpdate
+        ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileID}?uploadType=resumable&fields=kind,fileExtension,md5Checksum,mimeType,parents,size,spaces,id,name,trashed,createdTime,modifiedTime,quotaBytesUsed,originalFilename,fullFileExtension,sha1Checksum,sha256Checksum`
+        : `https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=kind,fileExtension,md5Checksum,mimeType,parents,size,spaces,id,name,trashed,createdTime,modifiedTime,quotaBytesUsed,originalFilename,fullFileExtension,sha1Checksum,sha256Checksum`;
+
+      const res = await fetch(uploadInitUrl, {
+        method: isUpdate ? "PATCH" : "POST",
+        headers: headers,
+        body: bodyStr,
+      });
       if (res.status !== 200) {
         throw Error(
-          `create resumable file ${key} failed! meta=${JSON.stringify(
+          `${isUpdate ? "update" : "create"} resumable file ${key} failed! status=${res.status}, meta=${JSON.stringify(
             meta
           )}, header=${JSON.stringify(headers)}`
         );
@@ -604,12 +637,12 @@ export class FakeFsGoogleDrive extends FakeFs {
       const uploadLocation = res.headers.get("Location");
       if (uploadLocation === null || !uploadLocation.startsWith("http")) {
         throw Error(
-          `create resumable file ${key} failed! meta=${JSON.stringify(
+          `${isUpdate ? "update" : "create"} resumable file ${key} failed! meta=${JSON.stringify(
             meta
           )}, header=${JSON.stringify(headers)}`
         );
       }
-      console.debug(`key=${key}, uploadLocaltion=${uploadLocation}`);
+      console.debug(`key=${key}, uploadLocation=${uploadLocation}`);
 
       // multiples of 256 KB (256 x 1024 bytes) in size
       const sizePerChunk = 5 * 4 * 256 * 1024; // 5.24 mb
@@ -638,7 +671,7 @@ export class FakeFsGoogleDrive extends FakeFs {
         });
         if (res.status >= 400 && res.status <= 599) {
           throw Error(
-            `create resumable file ${key} failed! meta=${JSON.stringify(
+            `${isUpdate ? "update" : "create"} resumable file ${key} failed! meta=${JSON.stringify(
               meta
             )}, header=${JSON.stringify(headers)}`
           );
@@ -647,7 +680,7 @@ export class FakeFsGoogleDrive extends FakeFs {
         if (res.status === 200 || res.status === 201) {
           const res2: File = await res.json();
           console.debug(
-            `upload ${key} with ${JSON.stringify(meta)}, res2=${JSON.stringify(
+            `${isUpdate ? "update" : "upload"} ${key} with ${JSON.stringify(meta)}, res2=${JSON.stringify(
               res2
             )}`
           );
@@ -730,6 +763,7 @@ export class FakeFsGoogleDrive extends FakeFs {
     if (res1.status !== 200) {
       throw Error(`cannot rm ${key} using fileID=${fileID}`);
     }
+    delete this.keyToGDEntity[key];
   }
 
   async checkConnect(callbackFunc?: any): Promise<boolean> {
