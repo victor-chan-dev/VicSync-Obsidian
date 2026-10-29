@@ -1,7 +1,7 @@
 {
   "id": "vicsync",
   "name": "VicSync",
-  "version": "0.5.37",
+  "version": "0.5.38",
   "minAppVersion": "0.13.21",
   "description": "Personal sync plugin for Obsidian supporting Google Drive and S3. Forked from Remotely Save (fyears).",
   "author": "Victor Chan (forked from fyears)",
