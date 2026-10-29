@@ -287,6 +287,7 @@ export class FakeFsGoogleDrive extends FakeFs {
    */
   async walk(): Promise<Entity[]> {
     await this._init();
+    this.keyToGDEntity = {};
     const allFiles: GDEntity[] = [];
 
     // bfs
@@ -374,22 +375,18 @@ export class FakeFsGoogleDrive extends FakeFs {
       // console.debug(k1);
       for (const file of (k1.files || []) as File[]) {
         const entity = fromFileToGDEntity(file, parentID, parentFolderPath);
-        const existing = this.keyToGDEntity[entity.keyRaw];
-        if (existing !== undefined) {
+        const existingIdx = filesOneLevel.findIndex(
+          (f) => f.keyRaw === entity.keyRaw
+        );
+        if (existingIdx !== -1) {
+          const existing = filesOneLevel[existingIdx];
           console.warn(
             `Duplicate file found in Google Drive: "${entity.keyRaw}". Existing ID=${existing.id} (mtime=${existing.mtimeSvr}), duplicate ID=${entity.id} (mtime=${entity.mtimeSvr})`
           );
           // Keep the newer version to resolve the ambiguity
           if ((entity.mtimeSvr ?? 0) > (existing.mtimeSvr ?? 0)) {
             this.keyToGDEntity[entity.keyRaw] = entity;
-            const idx = filesOneLevel.findIndex(
-              (f) => f.keyRaw === entity.keyRaw
-            );
-            if (idx !== -1) {
-              filesOneLevel[idx] = entity;
-            } else {
-              filesOneLevel.push(entity);
-            }
+            filesOneLevel[existingIdx] = entity;
           }
         } else {
           this.keyToGDEntity[entity.keyRaw] = entity; // build cache

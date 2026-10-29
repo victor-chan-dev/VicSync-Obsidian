@@ -1,6 +1,7 @@
 import { strict as assert } from "assert";
 import type { Entity, RemotelySavePluginSettings } from "../../src/baseTypes";
 import { cleanSyncDown } from "../src/cleanSyncDown";
+import { FakeFsGoogleDrive } from "../src/fsGoogleDrive";
 
 describe("CleanSyncDown", () => {
   const createMockDb = () => {
@@ -160,5 +161,91 @@ describe("CleanSyncDown", () => {
     // 4. Check database sync record is fresh
     assert.equal(await mockDb.prevSyncRecordsTbl.getItem("vault-1\tprofile-1\tOldNote.md"), undefined);
     assert.ok(await mockDb.prevSyncRecordsTbl.getItem("vault-1\tprofile-1\tCleanCloud/RemoteDoc.md") !== undefined);
+  });
+
+  it("FakeFsGoogleDrive: walk() after walkPartial() should NOT drop root-level entries", async () => {
+    const fsGD = new FakeFsGoogleDrive(
+      {
+        accessToken: "mock-token",
+        refreshToken: "mock-refresh",
+        accessTokenExpiresInSeconds: 3600,
+        accessTokenExpiresAtTime: Date.now() + 3600_000,
+        clientID: "cid",
+        clientSecret: "csecret",
+        remoteBaseDir: "Obsidian",
+        rootFolderID: "root-id",
+        kind: "googledrive",
+      } as any,
+      "Obsidian",
+      async () => {}
+    );
+
+    // Stub _init, _getAccessToken, and global fetch
+    (fsGD as any)._init = async () => {
+      (fsGD as any).baseDirID = "root-id";
+    };
+    (fsGD as any)._getAccessToken = async () => "mock-token";
+    const origFetch = globalThis.fetch;
+    try {
+      globalThis.fetch = (async (url: string) => {
+        const u = String(url);
+        if (u.includes(encodeURIComponent("'root-id' in parents"))) {
+          return {
+            status: 200,
+            json: async () => ({
+              files: [
+                {
+                  id: "folder-journals",
+                  name: "Journals",
+                  mimeType: "application/vnd.google-apps.folder",
+                  modifiedTime: "2026-10-28T10:00:00.000Z",
+                },
+                {
+                  id: "file-agents",
+                  name: "AGENTS.md",
+                  mimeType: "text/markdown",
+                  size: "123",
+                  modifiedTime: "2026-10-28T10:00:00.000Z",
+                },
+              ],
+            }),
+          } as any;
+        }
+        if (u.includes(encodeURIComponent("'folder-journals' in parents"))) {
+          return {
+            status: 200,
+            json: async () => ({
+              files: [
+                {
+                  id: "file-journal-1",
+                  name: "2026-10-28.md",
+                  mimeType: "text/markdown",
+                  size: "456",
+                  modifiedTime: "2026-10-28T11:00:00.000Z",
+                },
+              ],
+            }),
+          } as any;
+        }
+        return {
+          status: 200,
+          json: async () => ({ files: [] }),
+        } as any;
+      }) as any;
+
+      // 1. Call walkPartial() first (just like fsEncrypt.isPasswordOk() does)
+      const partial = await fsGD.walkPartial();
+      assert.equal(partial.length, 2);
+
+      // 2. Call walk() immediately afterward
+      const all = await fsGD.walk();
+      assert.equal(all.length, 3, "walk() must return all 3 entries even after walkPartial()");
+      assert.deepEqual(
+        all.map((e) => e.keyRaw).sort(),
+        ["AGENTS.md", "Journals/", "Journals/2026-10-28.md"]
+      );
+    } finally {
+      globalThis.fetch = origFetch;
+    }
   });
 });
