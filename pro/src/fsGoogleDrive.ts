@@ -490,6 +490,40 @@ export class FakeFsGoogleDrive extends FakeFs {
     let folderItselfWithoutSlash = folderLevels[folderLevels.length - 1];
     folderItselfWithoutSlash = folderItselfWithoutSlash.split("/").pop()!;
 
+    // Pre-check: Ensure a folder with this name does not already exist in Google Drive
+    // under parentID, preventing duplicate folder creation.
+    const safeName = folderItselfWithoutSlash.replace(/'/g, "\\'");
+    const checkFolderQuery = encodeURIComponent(
+      `'${parentID}' in parents and name='${safeName}' and mimeType='${FOLDER_MIME_TYPE}' and trashed=false`
+    );
+    try {
+      const checkRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=${checkFolderQuery}&fields=files(kind,fileExtension,md5Checksum,mimeType,parents,size,spaces,id,name,trashed,createdTime,modifiedTime,quotaBytesUsed,originalFilename,fullFileExtension,sha1Checksum,sha256Checksum)`,
+        {
+          headers: {
+            Authorization: `Bearer ${await this._getAccessToken()}`,
+          },
+        }
+      );
+      if (checkRes.status === 200) {
+        const checkData = await checkRes.json();
+        if (checkData.files && checkData.files.length > 0) {
+          console.info(
+            `[GoogleDrive] Folder already exists in remote: "${key}" (ID=${checkData.files[0].id}). Reusing it instead of duplicating.`
+          );
+          const entity = fromFileToGDEntity(
+            checkData.files[0],
+            parentID,
+            parentFolderPath
+          );
+          this.keyToGDEntity[key] = entity;
+          return entity;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not pre-check existing folder in Google Drive:", e);
+    }
+
     const meta: any = {
       mimeType: FOLDER_MIME_TYPE,
       modifiedTime: unixTimeToStr(mtime, true),
@@ -557,7 +591,36 @@ export class FakeFsGoogleDrive extends FakeFs {
     }
 
     const fileItself = key.split("/").pop()!;
-    const existingFileID = this.keyToGDEntity[key]?.id;
+    let existingFileID = this.keyToGDEntity[key]?.id;
+
+    if (!existingFileID) {
+      const safeFileName = fileItself.replace(/'/g, "\\'");
+      const q = encodeURIComponent(
+        `'${parentID}' in parents and name='${safeFileName}' and mimeType!='${FOLDER_MIME_TYPE}' and trashed=false`
+      );
+      try {
+        const checkRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,modifiedTime,createdTime)`,
+          {
+            headers: {
+              Authorization: `Bearer ${await this._getAccessToken()}`,
+            },
+          }
+        );
+        if (checkRes.status === 200) {
+          const checkData = await checkRes.json();
+          if (checkData.files && checkData.files.length > 0) {
+            existingFileID = checkData.files[0].id;
+            console.info(
+              `[GoogleDrive] Found existing remote file for "${key}" (ID=${existingFileID}). Updating via PATCH.`
+            );
+          }
+        }
+      } catch (e) {
+        console.warn("Could not check existing file in Google Drive:", e);
+      }
+    }
+
     const isUpdate = existingFileID !== undefined && existingFileID !== "";
 
     if (content.byteLength <= 5 * 1024 * 1024) {

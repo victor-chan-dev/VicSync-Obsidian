@@ -1,6 +1,6 @@
 {
   "name": "vicsync",
-  "version": "0.5.35",
+  "version": "0.5.36",
   "description": "VicSync: A custom sync plugin for Obsidian (forked from remotely-save).",
   "scripts": {
     "dev2": "node esbuild.config.mjs --watch",
