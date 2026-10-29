@@ -90,8 +90,17 @@ export async function cleanSyncDown(
   if (remoteFiles.length === 0) {
     const service = settings.serviceType;
     const baseDir = (fsEncrypt.innerFs as any)?.remoteBaseDir || "Obsidian";
+    let accountName = "Unknown";
+    try {
+      if (typeof (fsEncrypt.innerFs as any)?.getUserDisplayName === "function") {
+        accountName =
+          (await (fsEncrypt.innerFs as any).getUserDisplayName()) || "None";
+      }
+    } catch (e) {}
+
+    const baseDirID = (fsEncrypt.innerFs as any)?.baseDirID || "None";
     throw new Error(
-      `Remote storage has 0 files! (Service: "${service}", Base Directory: "${baseDir}"). Please verify that you are logged into the correct Google account and that the Base Directory in VicSync settings matches your vault folder.`
+      `Remote storage has 0 files! (Account: "${accountName}", Service: "${service}", Base Directory: "${baseDir}", Folder ID: "${baseDirID}"). Total entries found by walk: ${remoteEntityList.length}. Please verify that this account contains your "${baseDir}" folder.`
     );
   }
 
