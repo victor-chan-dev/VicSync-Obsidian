@@ -1,5 +1,6 @@
 import cloneDeep from "lodash/cloneDeep";
 import QRCode from "qrcode";
+import { base64url } from "rfc4648";
 
 import { getShrinkedSettings as getShrinkedSettingsOnedriveFull } from "../pro/src/fsOnedriveFull";
 import {
@@ -34,31 +35,44 @@ export const exportQrCodeUri = async (
     delete settings2.azureblobstorage;
     delete settings2.pro;
   } else if (exportFields === "s3") {
-    settings2 = { s3: cloneDeep(settings.s3) };
+    settings2 = { s3: cloneDeep(settings.s3), serviceType: "s3" };
   } else if (exportFields === "dropbox") {
-    settings2 = { dropbox: cloneDeep(settings.dropbox) };
+    settings2 = { dropbox: cloneDeep(settings.dropbox), serviceType: "dropbox" };
   } else if (exportFields === "onedrive") {
-    settings2 = { onedrive: getShrinkedSettingsOnedrive(settings.onedrive) };
+    settings2 = {
+      onedrive: getShrinkedSettingsOnedrive(settings.onedrive),
+      serviceType: "onedrive",
+    };
   } else if (exportFields === "onedrivefull") {
     settings2 = {
       onedrivefull: getShrinkedSettingsOnedriveFull(settings.onedrivefull),
+      serviceType: "onedrivefull",
     };
   } else if (exportFields === "webdav") {
-    settings2 = { webdav: cloneDeep(settings.webdav) };
+    settings2 = { webdav: cloneDeep(settings.webdav), serviceType: "webdav" };
   } else if (exportFields === "webdis") {
-    settings2 = { webdis: cloneDeep(settings.webdis) };
+    settings2 = { webdis: cloneDeep(settings.webdis), serviceType: "webdis" };
   } else if (exportFields === "googledrive") {
-    settings2 = { googledrive: cloneDeep(settings.googledrive) };
+    settings2 = {
+      googledrive: cloneDeep(settings.googledrive),
+      serviceType: "googledrive",
+    };
   } else if (exportFields === "box") {
-    settings2 = { box: cloneDeep(settings.box) };
+    settings2 = { box: cloneDeep(settings.box), serviceType: "box" };
   } else if (exportFields === "pcloud") {
-    settings2 = { pcloud: cloneDeep(settings.pcloud) };
+    settings2 = { pcloud: cloneDeep(settings.pcloud), serviceType: "pcloud" };
   } else if (exportFields === "yandexdisk") {
-    settings2 = { yandexdisk: cloneDeep(settings.yandexdisk) };
+    settings2 = {
+      yandexdisk: cloneDeep(settings.yandexdisk),
+      serviceType: "yandexdisk",
+    };
   } else if (exportFields === "koofr") {
-    settings2 = { koofr: cloneDeep(settings.koofr) };
+    settings2 = { koofr: cloneDeep(settings.koofr), serviceType: "koofr" };
   } else if (exportFields === "azureblobstorage") {
-    settings2 = { azureblobstorage: cloneDeep(settings.azureblobstorage) };
+    settings2 = {
+      azureblobstorage: cloneDeep(settings.azureblobstorage),
+      serviceType: "azureblobstorage",
+    };
   }
 
   delete settings2.vaultRandomID;
@@ -81,20 +95,31 @@ export interface ProcessQrCodeResultType {
 }
 
 /**
- * we also support directly parse the uri, instead of relying on web browser
+ * we also support directly parse the uri, or raw JSON, instead of relying on web browser
  * @param input
  */
 export const parseUriByHand = (input: string) => {
-  if (
-    !input.startsWith(`obsidian://${COMMAND_URI}?func=settings&`) &&
-    !input.startsWith("obsidian://remotely-save?func=settings&")
-  ) {
-    throw Error(`not valid string`);
+  const trimmed = input.trim();
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    return {
+      func: "settings",
+      data: trimmed,
+    };
   }
 
-  const k = new URL(input);
-  const output = Object.fromEntries(k.searchParams);
-  return output;
+  try {
+    const k = new URL(trimmed);
+    const output = Object.fromEntries(k.searchParams);
+    return output;
+  } catch (e) {
+    if (trimmed.includes("?")) {
+      const qs = trimmed.slice(trimmed.indexOf("?") + 1);
+      const params = new URLSearchParams(qs);
+      return Object.fromEntries(params);
+    }
+  }
+
+  throw Error(`Not a valid settings URI or JSON`);
 };
 
 export const importQrCodeUri = (
@@ -105,7 +130,6 @@ export const importQrCodeUri = (
   if (
     params.func === undefined ||
     params.func !== "settings" ||
-    params.vault === undefined ||
     params.data === undefined
   ) {
     return {
@@ -116,24 +140,27 @@ export const importQrCodeUri = (
     };
   }
 
-  if (params.vault !== currentVaultName) {
-    return {
-      status: "error",
-      message: `the target vault is ${
-        params.vault
-      } but you are currently in ${currentVaultName}: ${JSON.stringify(
-        inputParams
-      )}`,
-    };
-  }
-
   let settings = {} as RemotelySavePluginSettings;
   try {
-    settings = JSON.parse(params.data);
-  } catch (e) {
+    let rawStr = params.data;
+    try {
+      rawStr = decodeURIComponent(params.data);
+    } catch (e) {}
+
+    try {
+      settings = JSON.parse(rawStr);
+    } catch (e) {
+      // Try base64url decode
+      const buf = base64url.parse(params.data, {
+        out: Buffer.allocUnsafe as any,
+        loose: true,
+      }) as Buffer;
+      settings = JSON.parse(buf.toString("utf-8"));
+    }
+  } catch (e: any) {
     return {
       status: "error",
-      message: `errors while parsing settings: ${JSON.stringify(inputParams)}`,
+      message: `errors while parsing settings: ${e?.message || e}`,
     };
   }
   return {

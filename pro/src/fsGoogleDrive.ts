@@ -782,7 +782,27 @@ export class FakeFsGoogleDrive extends FakeFs {
   }
 
   async getUserDisplayName(): Promise<string> {
-    throw new Error("Method not implemented.");
+    try {
+      const res = await fetch(
+        "https://www.googleapis.com/drive/v3/about?fields=user",
+        {
+          headers: {
+            Authorization: `Bearer ${await this._getAccessToken()}`,
+          },
+        }
+      );
+      if (res.status === 200) {
+        const data = await res.json();
+        return (
+          data.user?.emailAddress ||
+          data.user?.displayName ||
+          "Google Drive User"
+        );
+      }
+    } catch (err) {
+      console.warn("Could not get Google Drive user display name:", err);
+    }
+    return "";
   }
 
   /**

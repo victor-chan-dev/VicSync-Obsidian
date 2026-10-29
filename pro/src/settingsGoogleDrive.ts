@@ -106,6 +106,22 @@ class GoogleDriveAuthModal extends Modal {
             // try to remove data in clipboard
             await navigator.clipboard.writeText("");
 
+            try {
+              const client = getClient(
+                this.plugin.settings,
+                this.app.vault.getName(),
+                () => this.plugin.saveSettings()
+              );
+              const name = await client.getUserDisplayName();
+              if (name) {
+                this.revokeAuthSetting.setDesc(
+                  `Signed in as: ${name}. ${t("settings_googledrive_revoke_desc")}`
+                );
+              }
+            } catch (err) {
+              console.debug("Could not fetch user name on auth:", err);
+            }
+
             new Notice(t("modal_googledrive_maualinput_succ_notice"));
           } catch (e) {
             console.error(e);
@@ -135,18 +151,21 @@ class GoogleDriveRevokeAuthModal extends Modal {
   readonly plugin: RemotelySavePlugin;
   readonly authDiv: HTMLDivElement;
   readonly revokeAuthDiv: HTMLDivElement;
+  readonly revokeAuthSetting: Setting;
   readonly t: (x: TransItemType, vars?: any) => string;
   constructor(
     app: App,
     plugin: RemotelySavePlugin,
     authDiv: HTMLDivElement,
     revokeAuthDiv: HTMLDivElement,
+    revokeAuthSetting: Setting,
     t: (x: TransItemType, vars?: any) => string
   ) {
     super(app);
     this.plugin = plugin;
     this.authDiv = authDiv;
     this.revokeAuthDiv = revokeAuthDiv;
+    this.revokeAuthSetting = revokeAuthSetting;
     this.t = t;
   }
 
@@ -187,6 +206,9 @@ class GoogleDriveRevokeAuthModal extends Modal {
               "googledrive-revoke-auth-button-hide",
               this.plugin.settings.googledrive.refreshToken === ""
             );
+            this.authDiv.style.display = "";
+            this.revokeAuthDiv.style.display = "none";
+            this.revokeAuthSetting.setDesc(t("settings_googledrive_revoke_desc"));
             new Notice(t("modal_googledriverevokeauth_clean_notice"));
             this.close();
           } catch (err) {
@@ -289,10 +311,32 @@ export const generateGoogleDriveSettingsPart = (
           plugin,
           googleDriveAuthDiv,
           googleDriveRevokeAuthDiv,
+          googleDriveRevokeAuthSetting,
           t
         ).open();
       });
     });
+
+  // Fetch and display user identity if authorized
+  if (plugin.settings.googledrive?.refreshToken) {
+    try {
+      const client = getClient(plugin.settings, app.vault.getName(), () =>
+        plugin.saveSettings()
+      );
+      client
+        .getUserDisplayName()
+        .then((name) => {
+          if (name) {
+            googleDriveRevokeAuthSetting.setDesc(
+              `Signed in as: ${name}. ${t("settings_googledrive_revoke_desc")}`
+            );
+          }
+        })
+        .catch(() => {});
+    } catch (e) {
+      // ignore
+    }
+  }
 
   new Setting(googleDriveAuthDiv)
     .setName(t("settings_googledrive_auth"))
