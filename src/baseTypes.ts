@@ -3,47 +3,16 @@
  * To avoid circular dependency.
  */
 
-import type {
-  AzureBlobStorageConfig,
-  BoxConfig,
-  GoogleDriveConfig,
-  KoofrConfig,
-  OnedriveFullConfig,
-  PCloudConfig,
-  ProConfig,
-  YandexDiskConfig,
-} from "../pro/src/baseTypesPro";
+import type { GoogleDriveConfig } from "../pro/src/baseTypesPro";
 import type { LangTypeAndAuto } from "./i18n";
-
-declare global {
-  var DEFAULT_DROPBOX_APP_KEY: string;
-  var DEFAULT_ONEDRIVE_CLIENT_ID: string;
-  var DEFAULT_ONEDRIVE_AUTHORITY: string;
-}
-
-export const DROPBOX_APP_KEY = global.DEFAULT_DROPBOX_APP_KEY;
-export const ONEDRIVE_CLIENT_ID = global.DEFAULT_ONEDRIVE_CLIENT_ID;
-export const ONEDRIVE_AUTHORITY = global.DEFAULT_ONEDRIVE_AUTHORITY;
 
 export const DEFAULT_CONTENT_TYPE = "application/octet-stream";
 
-export type SUPPORTED_SERVICES_TYPE =
-  | "s3"
-  | "webdav"
-  | "dropbox"
-  | "onedrive"
-  | "onedrivefull"
-  | "webdis"
-  | "googledrive"
-  | "box"
-  | "pcloud"
-  | "yandexdisk"
-  | "koofr"
-  | "azureblobstorage";
+export type SUPPORTED_SERVICES_TYPE = "googledrive" | "s3";
 
 export type SUPPORTED_SERVICES_TYPE_WITH_REMOTE_BASE_DIR = Exclude<
   SUPPORTED_SERVICES_TYPE,
-  "s3" | "azureblobstorage"
+  "s3"
 >;
 
 export interface S3Config {
@@ -68,74 +37,12 @@ export interface S3Config {
   bypassCorsLocally?: boolean;
 }
 
-export interface DropboxConfig {
-  accessToken: string;
-  clientID: string;
-  refreshToken: string;
-  accessTokenExpiresInSeconds: number;
-  accessTokenExpiresAtTime: number;
-  accountID: string;
-  username: string;
-  credentialsShouldBeDeletedAtTime?: number;
-  remoteBaseDir?: string;
-}
-
-export type WebdavAuthType = "digest" | "basic";
-export type WebdavDepthType =
-  | "auto" // deprecated on 20240116
-  | "auto_unknown" // deprecated on 20240116
-  | "auto_1" // deprecated on 20240116
-  | "auto_infinity" // deprecated on 20240116
-  | "manual_1"
-  | "manual_infinity";
-
-export interface WebdavConfig {
-  address: string;
-  username: string;
-  password: string;
-  authType: WebdavAuthType;
-
-  depth?: WebdavDepthType;
-  remoteBaseDir?: string;
-
-  customHeaders?: string;
-
-  /**
-   * @deprecated
-   */
-  manualRecursive: boolean; // deprecated in 0.3.6, use depth
-}
-
-export interface OnedriveConfig {
-  accessToken: string;
-  clientID: string;
-  authority: string;
-  refreshToken: string;
-  accessTokenExpiresInSeconds: number;
-  accessTokenExpiresAtTime: number;
-  deltaLink: string;
-  username: string;
-  credentialsShouldBeDeletedAtTime?: number;
-  remoteBaseDir?: string;
-  emptyFile: "skip" | "error";
-  kind: "onedrive";
-}
-
-export interface WebdisConfig {
-  address: string;
-  username?: string;
-  password?: string;
-  remoteBaseDir?: string;
-}
-
 export type SyncDirectionType =
   | "bidirectional"
   | "incremental_pull_only"
   | "incremental_push_only"
   | "incremental_pull_and_delete_only"
   | "incremental_push_and_delete_only";
-
-export type CipherMethodType = "rclone-base64" | "openssl-base64" | "unknown";
 
 export type QRExportType = "basic_and_advanced" | SUPPORTED_SERVICES_TYPE;
 
@@ -147,19 +54,9 @@ export interface ProfilerConfig {
 
 export interface RemotelySavePluginSettings {
   s3: S3Config;
-  webdav: WebdavConfig;
-  dropbox: DropboxConfig;
-  onedrive: OnedriveConfig;
-  onedrivefull: OnedriveFullConfig;
-  webdis: WebdisConfig;
   googledrive: GoogleDriveConfig;
-  box: BoxConfig;
-  pcloud: PCloudConfig;
-  yandexdisk: YandexDiskConfig;
-  koofr: KoofrConfig;
-  azureblobstorage: AzureBlobStorageConfig;
 
-  password: string;
+  password?: string;
   serviceType: SUPPORTED_SERVICES_TYPE;
   currLogLevel?: string;
   autoRunEveryMilliseconds?: number;
@@ -182,20 +79,9 @@ export interface RemotelySavePluginSettings {
   protectModifyPercentage?: number;
   syncDirection?: SyncDirectionType;
 
-  obfuscateSettingFile?: boolean;
-
   enableMobileStatusBar?: boolean;
 
-  encryptionMethod?: CipherMethodType;
-
   profiler?: ProfilerConfig;
-
-  pro?: ProConfig;
-
-  /**
-   * @deprecated
-   */
-  agreeToUploadExtraMetadata?: boolean;
 
   /**
    * @deprecated
@@ -215,8 +101,6 @@ export interface RemotelySavePluginSettings {
 
 export const COMMAND_URI = "vicsync";
 export const COMMAND_CALLBACK = "remotely-save-cb";
-export const COMMAND_CALLBACK_ONEDRIVE = "remotely-save-cb-onedrive";
-export const COMMAND_CALLBACK_DROPBOX = "remotely-save-cb-dropbox";
 
 export interface UriParams {
   func?: string;
@@ -224,9 +108,6 @@ export interface UriParams {
   ver?: string;
   data?: string;
 }
-
-// 80 days
-export const OAUTH2_FORCE_EXPIRE_MILLISECONDS = 1000 * 60 * 60 * 24 * 80;
 
 export type EmptyFolderCleanType = "skip" | "clean_both";
 
@@ -295,9 +176,6 @@ export interface UploadedType {
   mtimeCli?: number;
 }
 
-/**
- * A replacement of FileOrFolderMixedState
- */
 export interface MixedEntity {
   key: string;
   local?: Entity;
@@ -313,34 +191,6 @@ export interface MixedEntity {
   sideNotes?: any;
   moveSourceKey?: string;
   moveTargetKey?: string;
-}
-
-/**
- * @deprecated
- */
-export interface FileOrFolderMixedState {
-  key: string;
-  existLocal?: boolean;
-  existRemote?: boolean;
-  mtimeLocal?: number;
-  mtimeRemote?: number;
-  deltimeLocal?: number;
-  deltimeRemote?: number;
-  sizeLocal?: number;
-  sizeLocalEnc?: number;
-  sizeRemote?: number;
-  sizeRemoteEnc?: number;
-  changeRemoteMtimeUsingMapping?: boolean;
-  changeLocalMtimeUsingMapping?: boolean;
-  decision?: string; // old DecisionType is deleted, fallback to string
-  decisionBranch?: number;
-  syncDone?: "done";
-  remoteEncryptedKey?: string;
-
-  mtimeLocalFmt?: string;
-  mtimeRemoteFmt?: string;
-  deltimeLocalFmt?: string;
-  deltimeRemoteFmt?: string;
 }
 
 export const DEFAULT_DEBUG_FOLDER = "_debug_remotely_save/";

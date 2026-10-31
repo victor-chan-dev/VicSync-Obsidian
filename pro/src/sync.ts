@@ -14,7 +14,6 @@ import type {
 } from "../../src/baseTypes";
 import { copyFile, copyFileOrFolder, copyFolder } from "../../src/copyLogic";
 import type { FakeFs } from "../../src/fsAll";
-import type { FakeFsEncrypt } from "../../src/fsEncrypt";
 import {
   type InternalDBs,
   clearPrevSyncRecordByVaultAndProfile,
@@ -37,7 +36,6 @@ import {
   unixTimeToStr,
 } from "../../src/misc";
 import type { Profiler } from "../../src/profiler";
-import { checkProRunnableAndFixInplace } from "./account";
 import { isMergable, mergeFile, tryDuplicateFile } from "./conflictLogic";
 import {
   clearFileContentHistoryByVaultAndProfile,
@@ -50,11 +48,15 @@ const copyEntityAndFixTimeFormat = (
   serviceType: SUPPORTED_SERVICES_TYPE
 ) => {
   const result = Object.assign({}, src);
+  result.key = result.key ?? result.keyRaw;
+  result.keyEnc = result.keyRaw;
+  result.size = result.size ?? result.sizeRaw;
+  result.sizeEnc = result.sizeRaw;
   if (result.mtimeCli !== undefined) {
     if (result.mtimeCli === 0) {
       result.mtimeCli = undefined;
     } else {
-      if (serviceType === "s3" || serviceType === "dropbox") {
+      if (serviceType === "s3") {
         // round to second instead of millisecond
         result.mtimeCli = Math.floor(result.mtimeCli / 1000.0) * 1000;
       }
@@ -65,7 +67,7 @@ const copyEntityAndFixTimeFormat = (
     if (result.ctimeCli === 0) {
       result.ctimeCli = undefined;
     } else {
-      if (serviceType === "s3" || serviceType === "dropbox") {
+      if (serviceType === "s3") {
         // round to second instead of millisecond
         result.ctimeCli = Math.floor(result.ctimeCli / 1000.0) * 1000;
       }
@@ -76,7 +78,7 @@ const copyEntityAndFixTimeFormat = (
     if (result.mtimeSvr === 0) {
       result.mtimeSvr = undefined;
     } else {
-      if (serviceType === "s3" || serviceType === "dropbox") {
+      if (serviceType === "s3") {
         // round to second instead of millisecond
         result.mtimeSvr = Math.floor(result.mtimeSvr / 1000.0) * 1000;
       }
@@ -87,7 +89,7 @@ const copyEntityAndFixTimeFormat = (
     if (result.prevSyncTime === 0) {
       result.prevSyncTime = undefined;
     } else {
-      if (serviceType === "s3" || serviceType === "dropbox") {
+      if (serviceType === "s3") {
         // round to second instead of millisecond
         result.prevSyncTime = Math.floor(result.prevSyncTime / 1000.0) * 1000;
       }
@@ -367,7 +369,6 @@ const ensembleMixedEnties = async (
   syncUnderscoreItems: boolean,
   ignorePaths: string[],
   onlyAllowPaths: string[],
-  fsEncrypt: FakeFsEncrypt,
   serviceType: SUPPORTED_SERVICES_TYPE,
 
   profiler: Profiler | undefined
@@ -453,10 +454,7 @@ const ensembleMixedEnties = async (
         skipOrNotResults[key] = skipOrNot;
       }
 
-      // TODO: abstraction leaking?
-      const prevSyncCopied = await fsEncrypt.encryptEntity(
-        copyEntityAndFixTimeFormat(prevSync, serviceType)
-      );
+      const prevSyncCopied = copyEntityAndFixTimeFormat(prevSync, serviceType);
       if (finalMappings.hasOwnProperty(key)) {
         finalMappings[key].prevSync = prevSyncCopied;
       } else {
@@ -472,8 +470,6 @@ const ensembleMixedEnties = async (
   profiler?.insertSize("sizeof finalMappings", finalMappings);
 
   // local has to be last
-  // because we want to get keyEnc based on the remote
-  // (we don't consume prevSync here because it gains no benefit)
   for (const local of localEntityList) {
     const key = local.key!;
 
@@ -490,19 +486,7 @@ const ensembleMixedEnties = async (
       skipOrNotResults[key] = skipOrNot;
     }
 
-    // 20240907: users (not on windows) doesn't like it. revert back now.
-    // TODO: platform specific but not introducing obsidian dependency into sync.ts
-    // const checkValidNameResult = checkValidName(key);
-    // if (!checkValidNameResult.result) {
-    //   throw Error(
-    //     `your local folder/file name is invalid: ${checkValidNameResult.reason}`
-    //   );
-    // }
-
-    // TODO: abstraction leaking?
-    const localCopied = await fsEncrypt.encryptEntity(
-      copyEntityAndFixTimeFormat(local, serviceType)
-    );
+    const localCopied = copyEntityAndFixTimeFormat(local, serviceType);
     if (finalMappings.hasOwnProperty(key)) {
       finalMappings[key].local = localCopied;
     } else {
@@ -1558,7 +1542,7 @@ const dispatchOperationToActualV3 = async (
   profileID: string,
   r: MixedEntity,
   fsLocal: FakeFs,
-  fsEncrypt: FakeFsEncrypt,
+  fsRemote: FakeFs,
   db: InternalDBs,
   conflictAction: ConflictActionType
 ) => {
@@ -1665,7 +1649,7 @@ const dispatchOperationToActualV3 = async (
     const { entity, content } = await copyFileOrFolder(
       r.key,
       fsLocal,
-      fsEncrypt
+      fsRemote
     );
     // TODO: abstract away the dirty hack
     fullfillMTimeOfRemoteEntityInplace(entity, mtimeCli);
@@ -1699,7 +1683,7 @@ const dispatchOperationToActualV3 = async (
     if (r.key.endsWith("/")) {
       await fsLocal.mkdir(r.key);
     } else {
-      const { entity, content } = await copyFile(r.key, fsEncrypt, fsLocal);
+      const { entity, content } = await copyFile(r.key, fsRemote, fsLocal);
       e1 = entity;
       c1 = content;
     }
@@ -1722,7 +1706,7 @@ const dispatchOperationToActualV3 = async (
     }
   } else if (r.decision === "local_is_deleted_thus_also_delete_remote") {
     // local is deleted, we need to delete remote now
-    await fsEncrypt.rm(r.key);
+    await fsRemote.rm(r.key);
     await clearPrevSyncRecordByVaultAndProfile(
       db,
       vaultRandomID,
@@ -1774,7 +1758,7 @@ const dispatchOperationToActualV3 = async (
       console.warn(
         `Could not rename "${oldKey}" to "${newKey}": ${err?.message || err}. Falling back to copy.`
       );
-      await copyFile(newKey, fsEncrypt, fsLocal);
+      await copyFile(newKey, fsRemote, fsLocal);
       try {
         await fsLocal.rm(oldKey);
       } catch (rmErr) {
@@ -1786,7 +1770,8 @@ const dispatchOperationToActualV3 = async (
     const prevEntity = r.prevSync;
     const remoteWasModified =
       prevEntity !== undefined &&
-      (r.remote?.sizeEnc !== prevEntity.sizeEnc ||
+      ((r.remote?.sizeEnc ?? r.remote?.sizeRaw) !==
+        (prevEntity.sizeEnc ?? prevEntity.sizeRaw) ||
         (r.remote?.hash !== undefined &&
           prevEntity.hash !== undefined &&
           r.remote.hash !== prevEntity.hash));
@@ -1795,7 +1780,7 @@ const dispatchOperationToActualV3 = async (
       console.info(
         `remote file was also modified during/after move, downloading latest: "${newKey}"`
       );
-      await copyFile(newKey, fsEncrypt, fsLocal);
+      await copyFile(newKey, fsRemote, fsLocal);
     }
 
     await upsertPrevSyncRecordByVaultAndProfile(
@@ -1870,7 +1855,7 @@ const dispatchOperationToActualV3 = async (
       const { entity, content } = await mergeFile(
         r.key,
         fsLocal,
-        fsEncrypt,
+        fsRemote,
         origContent
       );
       await upsertPrevSyncRecordByVaultAndProfile(
@@ -1898,7 +1883,7 @@ const dispatchOperationToActualV3 = async (
       await tryDuplicateFile(
         r.key,
         fsLocal,
-        fsEncrypt,
+        fsRemote,
         async (upload) => {
           if (upload !== undefined) {
             // TODO: abstract away the dirty hack
@@ -1925,7 +1910,7 @@ const dispatchOperationToActualV3 = async (
     }
   } else if (r.decision === "folder_to_be_created") {
     await fsLocal.mkdir(r.key);
-    const { entity } = await copyFolder(r.key, fsLocal, fsEncrypt);
+    const { entity } = await copyFolder(r.key, fsLocal, fsRemote);
     await upsertPrevSyncRecordByVaultAndProfile(
       db,
       vaultRandomID,
@@ -1948,7 +1933,7 @@ const dispatchOperationToActualV3 = async (
       r.decision === "folder_to_be_deleted_on_both" ||
       r.decision === "folder_to_be_deleted_on_remote"
     ) {
-      await fsEncrypt.rm(r.key);
+      await fsRemote.rm(r.key);
     }
     await clearPrevSyncRecordByVaultAndProfile(
       db,
@@ -1965,7 +1950,7 @@ const dispatchOperationToActualV3 = async (
 export const doActualSync = async (
   mixedEntityMappings: Record<string, MixedEntity>,
   fsLocal: FakeFs,
-  fsEncrypt: FakeFsEncrypt,
+  fsRemote: FakeFs,
   vaultRandomID: string,
   profileID: string,
   concurrency: number,
@@ -2105,7 +2090,7 @@ export const doActualSync = async (
             profileID,
             val,
             fsLocal,
-            fsEncrypt,
+            fsRemote,
             db,
             conflictAction
           );
@@ -2162,7 +2147,6 @@ export type SyncStatusType =
 export async function syncer(
   fsLocal: FakeFs,
   fsRemote: FakeFs,
-  fsEncrypt: FakeFsEncrypt,
   profiler: Profiler | undefined,
   db: InternalDBs,
   triggerSource: SyncTriggerSourceType,
@@ -2191,10 +2175,6 @@ export async function syncer(
   let step = 0;
 
   try {
-    // check pro feature
-    // if anything goes wrong, it will throw
-    await checkProRunnableAndFixInplace(settings, pluginVersion, configSaver);
-
     // try mode?
     await notifyFunc?.(triggerSource, step);
 
@@ -2208,22 +2188,13 @@ export async function syncer(
     await notifyFunc?.(triggerSource, step);
     await ribboonFunc?.(triggerSource, step);
     await statusBarFunc?.(triggerSource, step, everythingOk);
-    if (fsEncrypt.innerFs !== fsRemote) {
-      throw Error(`your enc should has inner of the remote`);
-    }
-    const passwordCheckResult = await fsEncrypt.isPasswordOk();
-    if (!passwordCheckResult.ok) {
-      throw Error(passwordCheckResult.reason);
-    }
-    profiler?.insert(
-      `finish step${step} (list partial remote and check password)`
-    );
+    profiler?.insert(`finish step${step} (prepare remote)`);
 
     step = 3;
     await notifyFunc?.(triggerSource, step);
     await ribboonFunc?.(triggerSource, step);
     await statusBarFunc?.(triggerSource, step, everythingOk);
-    const remoteEntityList = await fsEncrypt.walk();
+    const remoteEntityList = await fsRemote.walk();
     // console.debug(`remoteEntityList:`);
     // console.debug(remoteEntityList);
     profiler?.insert(`finish step${step} (list remote)`);
@@ -2264,7 +2235,6 @@ export async function syncer(
       settings.syncUnderscoreItems ?? false,
       settings.ignorePaths ?? [],
       settings.onlyAllowPaths ?? [],
-      fsEncrypt,
       settings.serviceType,
       profiler
     );
@@ -2304,7 +2274,7 @@ export async function syncer(
       await doActualSync(
         mixedEntityMappings,
         fsLocal,
-        fsEncrypt,
+        fsRemote,
         vaultRandomID,
         profileID,
         settings.concurrency ?? 5,

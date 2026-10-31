@@ -1,7 +1,7 @@
 import PQueue from "p-queue";
 import type { Entity, RemotelySavePluginSettings } from "../../src/baseTypes";
 import { copyFile } from "../../src/copyLogic";
-import type { FakeFsEncrypt } from "../../src/fsEncrypt";
+import type { FakeFs } from "../../src/fsAll";
 import type { FakeFsLocal } from "../../src/fsLocal";
 import {
   type InternalDBs,
@@ -18,7 +18,7 @@ import { fullfillMTimeOfRemoteEntityInplace } from "./sync";
 
 export interface CleanSyncDownOptions {
   fsLocal: FakeFsLocal;
-  fsEncrypt: FakeFsEncrypt;
+  fsRemote: FakeFs;
   db: InternalDBs;
   vaultRandomID: string;
   profileID: string;
@@ -36,19 +36,18 @@ export interface CleanSyncDownResult {
 
 /**
  * Resets local vault from cloud storage (Clean Sync Down):
- * 1. Checks remote connection and password.
- * 2. Lists remote files and aborts if remote is empty.
- * 3. Safely moves existing local notes and folders into Trash (preserving .obsidian/).
- * 4. Clears local sync history database records.
- * 5. Recreates folder structure and downloads all remote files concurrently.
- * 6. Populates fresh prevSync records so subsequent syncs start clean.
+ * 1. Lists remote files and aborts if remote is empty.
+ * 2. Safely moves existing local notes and folders into Trash (preserving .obsidian/).
+ * 3. Clears local sync history database records.
+ * 4. Recreates folder structure and downloads all remote files concurrently.
+ * 5. Populates fresh prevSync records so subsequent syncs start clean.
  */
 export async function cleanSyncDown(
   options: CleanSyncDownOptions
 ): Promise<CleanSyncDownResult> {
   const {
     fsLocal,
-    fsEncrypt,
+    fsRemote,
     db,
     vaultRandomID,
     profileID,
@@ -58,20 +57,12 @@ export async function cleanSyncDown(
     callbackProgress,
   } = options;
 
-  // 1. Check password / remote credentials
-  const passwordCheckResult = await fsEncrypt.isPasswordOk();
-  if (!passwordCheckResult.ok) {
-    throw new Error(
-      passwordCheckResult.reason || "Remote password verification failed."
-    );
-  }
-
-  // 2. List remote files
+  // 1. List remote files
   notifyFunc?.("Listing remote files...");
-  const remoteEntityList = await fsEncrypt.walk();
+  const remoteEntityList = await fsRemote.walk();
 
   console.info(
-    `[CleanSyncDown] Remote walk completed: ${remoteEntityList.length} total entries found (Service: ${settings.serviceType}, BaseDir: ${(fsEncrypt.innerFs as any)?.remoteBaseDir || "default"}).`
+    `[CleanSyncDown] Remote walk completed: ${remoteEntityList.length} total entries found (Service: ${settings.serviceType}, BaseDir: ${(fsRemote as any)?.remoteBaseDir || "default"}).`
   );
 
   // Filter valid files (excluding directories and internal meta file)
@@ -89,16 +80,16 @@ export async function cleanSyncDown(
   // Critical safeguard: Never wipe local vault if remote is empty!
   if (remoteFiles.length === 0) {
     const service = settings.serviceType;
-    const baseDir = (fsEncrypt.innerFs as any)?.remoteBaseDir || "Obsidian";
+    const baseDir = (fsRemote as any)?.remoteBaseDir || "Obsidian";
     let accountName = "Unknown";
     try {
-      if (typeof (fsEncrypt.innerFs as any)?.getUserDisplayName === "function") {
+      if (typeof (fsRemote as any)?.getUserDisplayName === "function") {
         accountName =
-          (await (fsEncrypt.innerFs as any).getUserDisplayName()) || "None";
+          (await (fsRemote as any).getUserDisplayName()) || "None";
       }
     } catch (e) {}
 
-    const baseDirID = (fsEncrypt.innerFs as any)?.baseDirID || "None";
+    const baseDirID = (fsRemote as any)?.baseDirID || "None";
     throw new Error(
       `Remote storage has 0 files! (Account: "${accountName}", Service: "${service}", Base Directory: "${baseDir}", Folder ID: "${baseDirID}"). Total entries found by walk: ${remoteEntityList.length}. Please verify that this account contains your "${baseDir}" folder.`
     );
@@ -200,10 +191,13 @@ export async function cleanSyncDown(
       }
 
       try {
-        const { entity, content } = await copyFile(key, fsEncrypt, fsLocal);
+        const { entity, content } = await copyFile(key, fsRemote, fsLocal);
         const mtimeCli = entity.mtimeCli;
         fullfillMTimeOfRemoteEntityInplace(remEntity, mtimeCli);
         remEntity.key = remEntity.key ?? remEntity.keyRaw;
+        remEntity.keyEnc = remEntity.keyRaw;
+        remEntity.size = remEntity.size ?? remEntity.sizeRaw;
+        remEntity.sizeEnc = remEntity.sizeRaw;
 
         await upsertPrevSyncRecordByVaultAndProfile(
           db,

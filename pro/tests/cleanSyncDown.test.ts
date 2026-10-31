@@ -92,7 +92,7 @@ describe("CleanSyncDown", () => {
       async () => {
         await cleanSyncDown({
           fsLocal: mockLocal,
-          fsEncrypt: mockRemote,
+          fsRemote: mockRemote,
           db: mockDb,
           vaultRandomID: "vault-1",
           profileID: "profile-1",
@@ -134,7 +134,7 @@ describe("CleanSyncDown", () => {
 
     const result = await cleanSyncDown({
       fsLocal: mockLocal,
-      fsEncrypt: mockRemote,
+      fsRemote: mockRemote,
       db: mockDb,
       vaultRandomID: "vault-1",
       profileID: "profile-1",
