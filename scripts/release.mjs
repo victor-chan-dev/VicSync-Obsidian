@@ -128,17 +128,69 @@ function buildPlugin() {
   log(`Build successful! main.js size: ${(mainStat.size / 1024 / 1024).toFixed(2)} MB`);
 }
 
+function getCommitMessageForRelease(previousVersion) {
+  try {
+    if (previousVersion) {
+      const tagExists = execSync(`git tag -l "${previousVersion}"`).toString().trim();
+      if (tagExists) {
+        const commitLogs = execSync(`git log ${previousVersion}..HEAD --pretty=format:"- %s"`)
+          .toString()
+          .trim();
+        const nonReleaseCommits = commitLogs
+          .split("\n")
+          .map((s) => s.trim())
+          .filter(
+            (s) =>
+              s &&
+              !s.includes("chore: release") &&
+              !s.includes("[skip ci]")
+          );
+
+        if (nonReleaseCommits.length === 1) {
+          // If exactly 1 commit, get full message (subject + body)
+          const fullMsg = execSync('git log -1 --pretty=format:"%s%n%n%b"')
+            .toString()
+            .trim();
+          if (fullMsg && !fullMsg.startsWith("chore: release")) {
+            return fullMsg;
+          }
+        } else if (nonReleaseCommits.length > 1) {
+          return nonReleaseCommits.join("\n");
+        }
+      }
+    }
+  } catch (err) {
+    // ignore
+  }
+
+  try {
+    const fullMsg = execSync('git log -1 --pretty=format:"%s%n%n%b"')
+      .toString()
+      .trim();
+    if (fullMsg && !fullMsg.startsWith("chore: release")) {
+      return fullMsg;
+    }
+  } catch (err) {
+    // ignore
+  }
+
+  return "";
+}
+
 function commitAndTag(version) {
   log(`Committing and creating git tag "${version}"...`);
   try {
     execSync("git add -u && git add manifest.json manifest-beta.json package.json versions.json", { stdio: "inherit" });
     const status = execSync("git status --porcelain").toString();
     if (status.includes("manifest.json") || status.includes("package.json")) {
-      execSync(`git commit -m "chore: release ${version}"`, { stdio: "inherit" });
-      execSync("git push origin master", { stdio: "inherit" });
+      execSync(`git commit -m "chore: release ${version} [skip ci]"`, { stdio: "inherit" });
+      execSync("git push origin HEAD:master", { stdio: "inherit" });
     }
     // Tag
-    const existingTags = execSync("git tag -l").toString().split("\n");
+    const existingTags = execSync("git tag -l")
+      .toString()
+      .split("\n")
+      .map((t) => t.trim());
     if (!existingTags.includes(version)) {
       execSync(`git tag -a "${version}" -m "Release ${version}"`, { stdio: "inherit" });
       execSync(`git push origin "${version}"`, { stdio: "inherit" });
@@ -163,13 +215,25 @@ async function githubApi(endpoint, token, options = {}) {
   return res;
 }
 
-async function getOrCreateRelease(owner, repo, tag, token) {
+async function getOrCreateRelease(owner, repo, tag, token, releaseNotes = "") {
   log(`Checking for existing release for tag "${tag}"...`);
   const checkRes = await githubApi(`/repos/${owner}/${repo}/releases/tags/${tag}`, token);
+
+  const notesSection = releaseNotes
+    ? `**What's Changed:**\n\n${releaseNotes}\n\n---\n`
+    : "";
+  const bodyText = `### VicSync ${tag}\n\n${notesSection}Automated release of **VicSync** for Obsidian.\n\nIncluded assets:\n- \`main.js\`\n- \`manifest.json\`\n- \`styles.css\`\n\nInstall via BRAT or copy assets to \`.obsidian/plugins/vicsync/\`.`;
 
   if (checkRes.status === 200) {
     const release = await checkRes.json();
     log(`Found existing release: "${release.name || release.tag_name}" (ID: ${release.id})`);
+    if (releaseNotes) {
+      await githubApi(`/repos/${owner}/${repo}/releases/${release.id}`, token, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: bodyText }),
+      });
+    }
     return release;
   }
 
@@ -180,7 +244,7 @@ async function getOrCreateRelease(owner, repo, tag, token) {
     body: JSON.stringify({
       tag_name: tag,
       name: tag,
-      body: `### VicSync ${tag}\n\nAutomated release of **VicSync** for Obsidian.\n\nIncluded assets:\n- \`main.js\`\n- \`manifest.json\`\n- \`styles.css\`\n\nInstall via BRAT or copy assets to \`.obsidian/plugins/vicsync/\`.`,
+      body: bodyText,
       draft: false,
       prerelease: false,
     }),
@@ -245,13 +309,19 @@ async function uploadAssets(owner, repo, release, token) {
 }
 
 async function main() {
-  const bumpArg = process.argv[2]; // patch, minor, major, 0.5.26, or undefined
+  const bumpArg = process.argv[2] || "patch"; // patch, minor, major, 0.5.26, or current / --no-bump
   const { owner, repo } = getRepoInfo();
   log(`Repository: ${owner}/${repo}`);
 
   const currentManifest = JSON.parse(fs.readFileSync("manifest.json", "utf8"));
   const currentVersion = currentManifest.version;
   log(`Current manifest version: ${currentVersion}`);
+
+  // Capture commit message before committing the release chore
+  const releaseNotes = getCommitMessageForRelease(currentVersion);
+  if (releaseNotes) {
+    log(`Captured release notes:\n${releaseNotes}`);
+  }
 
   let targetVersion = currentVersion;
   const isBumping = bumpArg && bumpArg !== "current" && bumpArg !== "--no-bump";
@@ -270,7 +340,7 @@ async function main() {
     commitAndTag(targetVersion);
   }
 
-  const release = await getOrCreateRelease(owner, repo, targetVersion, token);
+  const release = await getOrCreateRelease(owner, repo, targetVersion, token, releaseNotes);
   await uploadAssets(owner, repo, release, token);
 
   console.log("");

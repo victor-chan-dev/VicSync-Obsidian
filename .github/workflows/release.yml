@@ -1,21 +1,21 @@
-# modified from https://github.com/argenos/nldates-obsidian/blob/master/.github/workflows/release.yml
-# which is released under MIT License
-
-# trigger:
-# modify manifest.json, package.json, versions.json
-# git tag <version number>
-# git push origin --tags
-
 name: Release A New Version
 
 on:
   push:
+    branches:
+      - master
     tags:
-      - "*" # Push events to matching any tag format, i.e. 1.0, 20.15.10
+      - "*"
+
+permissions:
+  contents: write
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
+    if: |
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      !startsWith(github.event.head_commit.message, 'chore: release')
 
     environment: env-for-buildci
 
@@ -36,17 +36,22 @@ jobs:
       KOOFR_CLIENT_ID: ${{secrets.KOOFR_CLIENT_ID}}
       KOOFR_CLIENT_SECRET: ${{secrets.KOOFR_CLIENT_SECRET}}
 
-    strategy:
-      matrix:
-        node-version: [20.x]
-
     steps:
       - name: Checkout codes
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Git user
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
       - name: Checkout LFS file list
         run: git lfs ls-files --long | cut -d ' ' -f1 | sort > .lfs-assets-id
+
       - name: LFS Cache
         uses: actions/cache@v4
         with:
@@ -54,23 +59,27 @@ jobs:
           key: ${{ runner.os }}-lfs-${{ hashFiles('.lfs-assets-id') }}
           restore-keys: |
             ${{ runner.os }}-lfs-
+
       - name: Git LFS Pull
         run: git lfs pull
-      - name: Use Node.js ${{ matrix.node-version }}
+
+      - name: Use Node.js 20.x
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 20.x
+          cache: "npm"
+
       - run: npm install
-      - run: npm test
-      - run: npm run build
-      - name: Create Release And Upload
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            main.js
-            manifest.json
-            styles.css
-          token: ${{ secrets.GITHUB_TOKEN }}
-          draft: false
-          prerelease: false
-          make_latest: true
+
+      - name: Run Tests
+        run: npx mocha --import=tsx 'pro/tests/**/*.ts'
+
+      - name: Build, Tag, and Publish Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            node scripts/release.mjs current
+          else
+            node scripts/release.mjs patch
+          fi
