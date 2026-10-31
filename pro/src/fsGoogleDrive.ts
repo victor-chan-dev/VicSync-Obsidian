@@ -33,6 +33,19 @@ export const DEFAULT_GOOGLEDRIVE_CONFIG: GoogleDriveConfig = {
 const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
 
 /**
+ * Checks whether a Google Drive item is a native Google Doc/Sheet/Slide or shortcut/form/etc.
+ * Native Google Docs cannot be downloaded directly via /files/{id}?alt=media (Google returns 403/400).
+ * They only exist in Google Drive and should not be synced down as binary vault files.
+ */
+export const isGoogleAppsDoc = (file: File): boolean => {
+  if (!file.mimeType) return false;
+  return (
+    file.mimeType.startsWith("application/vnd.google-apps.") &&
+    file.mimeType !== FOLDER_MIME_TYPE
+  );
+};
+
+/**
  * A simplified version of the type
  *
  */
@@ -374,6 +387,15 @@ export class FakeFsGoogleDrive extends FakeFs {
       const k1 = await k.json();
       // console.debug(k1);
       for (const file of (k1.files || []) as File[]) {
+        // Skip Google Workspace docs (Docs, Sheets, Slides, Shortcuts, Forms)
+        // These are web-only docs and do not have binary content (/alt=media returns HTTP 403).
+        if (isGoogleAppsDoc(file)) {
+          console.debug(
+            `[GoogleDrive] Skipping non-binary Google Apps document: "${file.name}" (mimeType=${file.mimeType}, id=${file.id})`
+          );
+          continue;
+        }
+
         const entity = fromFileToGDEntity(file, parentID, parentFolderPath);
         const existingIdx = filesOneLevel.findIndex(
           (f) => f.keyRaw === entity.keyRaw
@@ -789,7 +811,10 @@ export class FakeFsGoogleDrive extends FakeFs {
       }
     );
     if (res1.status !== 200) {
-      throw Error(`cannot download ${key} using fileID=${fileID}`);
+      const errText = await res1.text().catch(() => "");
+      throw Error(
+        `cannot download ${key} using fileID=${fileID} (HTTP ${res1.status}: ${errText})`
+      );
     }
     const res2 = await res1.arrayBuffer();
     return res2;

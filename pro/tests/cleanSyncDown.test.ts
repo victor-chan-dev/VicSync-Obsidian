@@ -223,6 +223,18 @@ describe("CleanSyncDown", () => {
                   size: "456",
                   modifiedTime: "2026-10-28T11:00:00.000Z",
                 },
+                {
+                  id: "file-google-doc",
+                  name: "2026 - Week 44",
+                  mimeType: "application/vnd.google-apps.document",
+                  modifiedTime: "2026-10-28T11:00:00.000Z",
+                },
+                {
+                  id: "file-google-sheet",
+                  name: "Budget",
+                  mimeType: "application/vnd.google-apps.spreadsheet",
+                  modifiedTime: "2026-10-28T11:00:00.000Z",
+                },
               ],
             }),
           } as any;
