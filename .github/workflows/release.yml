@@ -6,6 +6,7 @@ on:
       - master
     tags:
       - "*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -14,8 +15,9 @@ jobs:
   release:
     runs-on: ubuntu-latest
     if: |
-      !contains(github.event.head_commit.message, '[skip ci]') &&
-      !startsWith(github.event.head_commit.message, 'chore: release')
+      github.event_name == 'workflow_dispatch' ||
+      (!contains(github.event.head_commit.message, '[skip ci]') &&
+       !startsWith(github.event.head_commit.message, 'chore: release'))
 
     environment: env-for-buildci
 
