@@ -18,10 +18,10 @@ import {
   setIcon,
 } from "obsidian";
 import { base64url } from "rfc4648";
-import { DEFAULT_GOOGLEDRIVE_CONFIG } from "../pro/src/fsGoogleDrive";
-import { cleanSyncDown } from "../pro/src/cleanSyncDown";
-import { syncer } from "../pro/src/sync";
-import { ResetLocalModal } from "./resetLocalModal";
+import { DEFAULT_GOOGLEDRIVE_CONFIG } from "./storage/fsGoogleDrive";
+import { cleanSyncDown } from "./sync/cleanSyncDown";
+import { syncer } from "./sync/sync";
+import { ResetLocalModal } from "./ui/resetLocalModal";
 import type {
   RemotelySavePluginSettings,
   SyncDirectionType,
@@ -32,17 +32,17 @@ import {
   COMMAND_URI,
   DEFAULT_DEBUG_LOG_FILE,
 } from "./baseTypes";
-import { API_VER_ENSURE_REQURL_OK } from "./baseTypesObs";
+import { API_VER_ENSURE_REQURL_OK } from "./utils/baseTypesObs";
 import {
   appendDebugLogToVault,
   exportVaultSyncPlansToFiles,
-} from "./debugMode";
-import { getClient } from "./fsGetter";
-import { FakeFsLocal } from "./fsLocal";
-import { DEFAULT_S3_CONFIG } from "./fsS3";
-import { I18n } from "./i18n";
-import type { LangTypeAndAuto, TransItemType } from "./i18n";
-import { importQrCodeUri } from "./importExport";
+} from "./utils/debugMode";
+import { getClient } from "./storage/fsGetter";
+import { FakeFsLocal } from "./storage/fsLocal";
+import { DEFAULT_S3_CONFIG } from "./storage/fsS3";
+import { I18n } from "./utils/i18n";
+import type { LangTypeAndAuto, TransItemType } from "./utils/i18n";
+import { importQrCodeUri } from "./utils/importExport";
 import {
   type InternalDBs,
   clearAllLoggerOutputRecords,
@@ -53,10 +53,10 @@ import {
   upsertLastFailedSyncTimeByVault,
   upsertLastSuccessSyncTimeByVault,
   upsertPluginVersionByVault,
-} from "./localdb";
-import { changeMobileStatusBar, reverseString } from "./misc";
-import { DEFAULT_PROFILER_CONFIG, Profiler } from "./profiler";
-import { RemotelySaveSettingTab } from "./settings";
+} from "./utils/localdb";
+import { changeMobileStatusBar, reverseString } from "./utils/misc";
+import { DEFAULT_PROFILER_CONFIG, Profiler } from "./utils/profiler";
+import { RemotelySaveSettingTab } from "./ui/settings";
 
 const decodeLegacyConfigIfNeeded = (
   raw: any

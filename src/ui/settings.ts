@@ -1,0 +1,1568 @@
+import { Eye, EyeOff, createElement } from "lucide";
+import {
+  type App,
+  Modal,
+  Notice,
+  Platform,
+  PluginSettingTab,
+  Setting,
+  requireApiVersion,
+} from "obsidian";
+import type { TextComponent } from "obsidian";
+import type {
+  ConflictActionType,
+  EmptyFolderCleanType,
+  QRExportType,
+  SUPPORTED_SERVICES_TYPE,
+  SUPPORTED_SERVICES_TYPE_WITH_REMOTE_BASE_DIR,
+  SyncDirectionType,
+} from "../baseTypes";
+
+import cloneDeep from "lodash/cloneDeep";
+import { generateClearDupFilesSettingsPart } from "./settingsClearDupFiles";
+import { generateGoogleDriveSettingsPart } from "./settingsGoogleDrive";
+import { API_VER_ENSURE_REQURL_OK, VALID_REQURL } from "../utils/baseTypesObs";
+import {
+  exportVaultProfilerResultsToFiles,
+  exportVaultSyncPlansToFiles,
+} from "../utils/debugMode";
+import { getClient } from "../storage/fsGetter";
+import { simpleTransRemotePrefix } from "../storage/fsS3";
+import type { TransItemType } from "../utils/i18n";
+import {
+  exportQrCodeUri,
+  importQrCodeUri,
+  parseUriByHand,
+} from "../utils/importExport";
+import {
+  clearAllPrevSyncRecordByVault,
+  clearAllSyncPlanRecords,
+  destroyDBs,
+  upsertLastFailedSyncTimeByVault,
+  upsertLastSuccessSyncTimeByVault,
+} from "../utils/localdb";
+import type RemotelySavePlugin from "../main";
+import {
+  changeMobileStatusBar,
+  checkHasSpecialCharForDir,
+  stringToFragment,
+} from "../utils/misc";
+import { DEFAULT_PROFILER_CONFIG } from "../utils/profiler";
+
+export class ChangeRemoteBaseDirModal extends Modal {
+  readonly plugin: RemotelySavePlugin;
+  readonly newRemoteBaseDir: string;
+  readonly service: SUPPORTED_SERVICES_TYPE_WITH_REMOTE_BASE_DIR;
+  constructor(
+    app: App,
+    plugin: RemotelySavePlugin,
+    newRemoteBaseDir: string,
+    service: SUPPORTED_SERVICES_TYPE_WITH_REMOTE_BASE_DIR
+  ) {
+    super(app);
+    this.plugin = plugin;
+    this.newRemoteBaseDir = newRemoteBaseDir;
+    this.service = service;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+
+    const t = (x: TransItemType, vars?: any) => {
+      return this.plugin.i18n.t(x, vars);
+    };
+
+    contentEl.createEl("h2", { text: t("modal_remotebasedir_title") });
+    t("modal_remotebasedir_shortdesc")
+      .split("\n")
+      .forEach((val, idx) => {
+        contentEl.createEl("p", {
+          text: val,
+        });
+      });
+
+    if (
+      this.newRemoteBaseDir === "" ||
+      this.newRemoteBaseDir === "Obsidian" ||
+      this.newRemoteBaseDir === this.app.vault.getName()
+    ) {
+      new Setting(contentEl)
+        .addButton((button) => {
+          button.setButtonText(
+            t("modal_remotebasedir_secondconfirm_vaultname")
+          );
+          button.onClick(async () => {
+            // in the settings, the value is reset to default "Obsidian"
+            this.plugin.settings[this.service].remoteBaseDir = "Obsidian";
+            await this.plugin.saveSettings();
+            new Notice(t("modal_remotebasedir_notice"));
+            this.close();
+          });
+          button.setClass("remotebasedir-second-confirm");
+        })
+        .addButton((button) => {
+          button.setButtonText(t("goback"));
+          button.onClick(() => {
+            this.close();
+          });
+        });
+    } else if (checkHasSpecialCharForDir(this.newRemoteBaseDir)) {
+      contentEl.createEl("p", {
+        text: t("modal_remotebasedir_invaliddirhint"),
+      });
+      new Setting(contentEl).addButton((button) => {
+        button.setButtonText(t("goback"));
+        button.onClick(() => {
+          this.close();
+        });
+      });
+    } else {
+      new Setting(contentEl)
+        .addButton((button) => {
+          button.setButtonText(t("modal_remotebasedir_secondconfirm_change"));
+          button.onClick(async () => {
+            this.plugin.settings[this.service].remoteBaseDir =
+              this.newRemoteBaseDir;
+            await this.plugin.saveSettings();
+            new Notice(t("modal_remotebasedir_notice"));
+            this.close();
+          });
+          button.setClass("remotebasedir-second-confirm");
+        })
+        .addButton((button) => {
+          button.setButtonText(t("goback"));
+          button.onClick(() => {
+            this.close();
+          });
+        });
+    }
+  }
+
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+}
+
+/**
+ * s3 is special and do not necessarily the same as others
+ * thus a new Modal here
+ */
+class ChangeS3RemotePrefixModal extends Modal {
+  readonly plugin: RemotelySavePlugin;
+  readonly newRemotePrefix: string;
+  constructor(app: App, plugin: RemotelySavePlugin, newRemotePrefix: string) {
+    super(app);
+    this.plugin = plugin;
+    this.newRemotePrefix = newRemotePrefix;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+
+    const t = (x: TransItemType, vars?: any) => {
+      return this.plugin.i18n.t(x, vars);
+    };
+
+    contentEl.createEl("h2", { text: t("modal_remoteprefix_s3_title") });
+    t("modal_remoteprefix_s3_shortdesc")
+      .split("\n")
+      .forEach((val, idx) => {
+        contentEl.createEl("p", {
+          text: val,
+        });
+      });
+
+    contentEl.createEl("p", {
+      text: t("modal_remoteprefix_s3_tosave", { prefix: this.newRemotePrefix }),
+    });
+
+    if (
+      this.newRemotePrefix === "" ||
+      this.newRemotePrefix === this.app.vault.getName()
+    ) {
+      new Setting(contentEl)
+        .addButton((button) => {
+          button.setButtonText(t("modal_remoteprefix_s3_secondconfirm_empty"));
+          button.onClick(async () => {
+            // in the settings, the value is reset to the special case ""
+            this.plugin.settings.s3.remotePrefix = "";
+            await this.plugin.saveSettings();
+            new Notice(t("modal_remoteprefix_s3_notice"));
+            this.close();
+          });
+          button.setClass("remoteprefix-second-confirm");
+        })
+        .addButton((button) => {
+          button.setButtonText(t("goback"));
+          button.onClick(() => {
+            this.close();
+          });
+        });
+    } else {
+      new Setting(contentEl)
+        .addButton((button) => {
+          button.setButtonText(t("modal_remoteprefix_s3_secondconfirm_change"));
+          button.onClick(async () => {
+            this.plugin.settings.s3.remotePrefix = this.newRemotePrefix;
+            await this.plugin.saveSettings();
+            new Notice(t("modal_remoteprefix_s3_notice"));
+            this.close();
+          });
+          button.setClass("remoteprefix-s3-second-confirm");
+        })
+        .addButton((button) => {
+          button.setButtonText(t("goback"));
+          button.onClick(() => {
+            this.close();
+          });
+        });
+    }
+  }
+
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+}
+
+class SyncConfigDirModal extends Modal {
+  plugin: RemotelySavePlugin;
+  saveDropdownFunc: () => void;
+  constructor(
+    app: App,
+    plugin: RemotelySavePlugin,
+    saveDropdownFunc: () => void
+  ) {
+    super(app);
+    this.plugin = plugin;
+    this.saveDropdownFunc = saveDropdownFunc;
+  }
+
+  async onOpen() {
+    const { contentEl } = this;
+
+    const t = (x: TransItemType, vars?: any) => {
+      return this.plugin.i18n.t(x, vars);
+    };
+
+    t("modal_syncconfig_attn")
+      .split("\n")
+      .forEach((val) => {
+        contentEl.createEl("p", {
+          text: val,
+        });
+      });
+
+    new Setting(contentEl)
+      .addButton((button) => {
+        button.setButtonText(t("modal_syncconfig_secondconfirm"));
+        button.onClick(async () => {
+          this.plugin.settings.syncConfigDir = true;
+          await this.plugin.saveSettings();
+          this.saveDropdownFunc();
+          new Notice(t("modal_syncconfig_notice"));
+          this.close();
+        });
+      })
+      .addButton((button) => {
+        button.setButtonText(t("goback"));
+        button.onClick(() => {
+          this.close();
+        });
+      });
+  }
+
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+}
+
+class ExportSettingsQrCodeModal extends Modal {
+  plugin: RemotelySavePlugin;
+  exportType: QRExportType;
+  constructor(app: App, plugin: RemotelySavePlugin, exportType: QRExportType) {
+    super(app);
+    this.plugin = plugin;
+    this.exportType = exportType;
+  }
+
+  async onOpen() {
+    const { contentEl } = this;
+
+    const t = (x: TransItemType, vars?: any) => {
+      return this.plugin.i18n.t(x, vars);
+    };
+
+    const { rawUri, imgUri } = await exportQrCodeUri(
+      this.plugin.settings,
+      this.app.vault.getName(),
+      this.plugin.manifest.version,
+      this.exportType
+    );
+
+    const div1 = contentEl.createDiv();
+    t("modal_qr_shortdesc")
+      .split("\n")
+      .forEach((val) => {
+        div1.createEl("p", {
+          text: val,
+        });
+      });
+
+    const div2 = contentEl.createDiv();
+    div2.createEl(
+      "button",
+      {
+        text: t("modal_qr_button"),
+      },
+      (el) => {
+        el.onclick = async () => {
+          await navigator.clipboard.writeText(rawUri);
+          new Notice(t("modal_qr_button_notice"));
+        };
+      }
+    );
+
+    const div3 = contentEl.createDiv();
+    div3.createEl(
+      "img",
+      {
+        cls: "qrcode-img",
+      },
+      async (el) => {
+        el.src = imgUri;
+      }
+    );
+  }
+
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+}
+
+const getEyesElements = () => {
+  const eyeEl = createElement(Eye);
+  const eyeOffEl = createElement(EyeOff);
+  return {
+    eye: eyeEl.outerHTML,
+    eyeOff: eyeOffEl.outerHTML,
+  };
+};
+
+export const wrapTextWithPasswordHide = (text: TextComponent) => {
+  const { eye, eyeOff } = getEyesElements();
+  const hider = text.inputEl.insertAdjacentElement("afterend", createSpan())!;
+  // the init type of hider is "hidden" === eyeOff === password
+  hider.innerHTML = eyeOff;
+  hider.addEventListener("click", (e) => {
+    const isText = text.inputEl.getAttribute("type") === "text";
+    hider.innerHTML = isText ? eyeOff : eye;
+    text.inputEl.setAttribute("type", isText ? "password" : "text");
+    text.inputEl.focus();
+  });
+
+  // the init type of text el is password
+  text.inputEl.setAttribute("type", "password");
+  return text;
+};
+
+export class RemotelySaveSettingTab extends PluginSettingTab {
+  readonly plugin: RemotelySavePlugin;
+
+  constructor(app: App, plugin: RemotelySavePlugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+
+  display(): void {
+    const { containerEl } = this;
+    containerEl.style.setProperty("overflow-wrap", "break-word");
+
+    containerEl.empty();
+
+    const t = (x: TransItemType, vars?: any) => {
+      return this.plugin.i18n.t(x, vars);
+    };
+
+    containerEl.createEl("h1", { text: "VicSync" });
+    containerEl.createEl("p", { text: "Personal sync for Obsidian (Forked from Remotely Save)", cls: "setting-item-description" });
+
+    //////////////////////////////////////////////////
+    // below for service chooser (part 1/2)
+    //////////////////////////////////////////////////
+
+    // we need to create the div in advance of any other service divs
+    const serviceChooserDiv = containerEl.createDiv();
+    serviceChooserDiv.createEl("h2", { text: t("settings_chooseservice") });
+
+    //////////////////////////////////////////////////
+    // below for s3
+    //////////////////////////////////////////////////
+
+    const s3Div = containerEl.createEl("div", { cls: "s3-hide" });
+    s3Div.toggleClass("s3-hide", this.plugin.settings.serviceType !== "s3");
+    s3Div.style.display = this.plugin.settings.serviceType === "s3" ? "" : "none";
+    s3Div.createEl("h2", { text: t("settings_s3") });
+
+    const s3LongDescDiv = s3Div.createEl("div", { cls: "settings-long-desc" });
+
+    for (const c of [
+      t("settings_s3_disclaimer1"),
+      t("settings_s3_disclaimer2"),
+    ]) {
+      s3LongDescDiv.createEl("p", {
+        text: c,
+        cls: "s3-disclaimer",
+      });
+    }
+
+    if (!VALID_REQURL) {
+      s3LongDescDiv.createEl("p", {
+        text: t("settings_s3_cors"),
+      });
+    }
+
+    s3LongDescDiv.createEl("p", {
+      text: t("settings_s3_prod"),
+    });
+
+    const s3LinksUl = s3LongDescDiv.createEl("ul");
+
+    s3LinksUl.createEl("li").createEl("a", {
+      href: "https://docs.aws.amazon.com/general/latest/gr/s3.html",
+      text: t("settings_s3_prod1"),
+    });
+
+    s3LinksUl.createEl("li").createEl("a", {
+      href: "https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/getting-your-credentials.html",
+      text: t("settings_s3_prod2"),
+    });
+
+    if (!VALID_REQURL) {
+      s3LinksUl.createEl("li").createEl("a", {
+        href: "https://docs.aws.amazon.com/AmazonS3/latest/userguide/enabling-cors-examples.html",
+        text: t("settings_s3_prod3"),
+      });
+    }
+
+    new Setting(s3Div)
+      .setName(t("settings_s3_endpoint"))
+      .setDesc(t("settings_s3_endpoint"))
+      .addText((text) =>
+        text
+          .setPlaceholder("")
+          .setValue(this.plugin.settings.s3.s3Endpoint)
+          .onChange(async (value) => {
+            this.plugin.settings.s3.s3Endpoint = value.trim();
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(s3Div)
+      .setName(t("settings_s3_region"))
+      .setDesc(t("settings_s3_region_desc"))
+      .addText((text) =>
+        text
+          .setPlaceholder("")
+          .setValue(`${this.plugin.settings.s3.s3Region}`)
+          .onChange(async (value) => {
+            this.plugin.settings.s3.s3Region = value.trim();
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(s3Div)
+      .setName(t("settings_s3_accesskeyid"))
+      .setDesc(t("settings_s3_accesskeyid_desc"))
+      .addText((text) => {
+        wrapTextWithPasswordHide(text);
+        text
+          .setPlaceholder("")
+          .setValue(`${this.plugin.settings.s3.s3AccessKeyID}`)
+          .onChange(async (value) => {
+            this.plugin.settings.s3.s3AccessKeyID = value.trim();
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(s3Div)
+      .setName(t("settings_s3_secretaccesskey"))
+      .setDesc(t("settings_s3_secretaccesskey_desc"))
+      .addText((text) => {
+        wrapTextWithPasswordHide(text);
+        text
+          .setPlaceholder("")
+          .setValue(`${this.plugin.settings.s3.s3SecretAccessKey}`)
+          .onChange(async (value) => {
+            this.plugin.settings.s3.s3SecretAccessKey = value.trim();
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(s3Div)
+      .setName(t("settings_s3_bucketname"))
+      .setDesc(t("settings_s3_bucketname"))
+      .addText((text) =>
+        text
+          .setPlaceholder("")
+          .setValue(`${this.plugin.settings.s3.s3BucketName}`)
+          .onChange(async (value) => {
+            this.plugin.settings.s3.s3BucketName = value.trim();
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(s3Div)
+      .setName(t("settings_s3_urlstyle"))
+      .setDesc(t("settings_s3_urlstyle_desc"))
+      .addDropdown((dropdown) => {
+        dropdown.addOption(
+          "virtualHostedStyle",
+          "Virtual Hosted-Style (default)"
+        );
+        dropdown.addOption("pathStyle", "Path-Style");
+        dropdown
+          .setValue(
+            this.plugin.settings.s3.forcePathStyle
+              ? "pathStyle"
+              : "virtualHostedStyle"
+          )
+          .onChange(async (val: string) => {
+            this.plugin.settings.s3.forcePathStyle = val === "pathStyle";
+            await this.plugin.saveSettings();
+          });
+      });
+
+    if (VALID_REQURL && !requireApiVersion(API_VER_ENSURE_REQURL_OK)) {
+      new Setting(s3Div)
+        .setName(t("settings_s3_bypasscorslocally"))
+        .setDesc(t("settings_s3_bypasscorslocally_desc"))
+        .addDropdown((dropdown) => {
+          dropdown
+            .addOption("disable", t("disable"))
+            .addOption("enable", t("enable"));
+
+          dropdown
+            .setValue(
+              `${
+                this.plugin.settings.s3.bypassCorsLocally ? "enable" : "disable"
+              }`
+            )
+            .onChange(async (value) => {
+              if (value === "enable") {
+                this.plugin.settings.s3.bypassCorsLocally = true;
+              } else {
+                this.plugin.settings.s3.bypassCorsLocally = false;
+              }
+              await this.plugin.saveSettings();
+            });
+        });
+    }
+
+    new Setting(s3Div)
+      .setName(t("settings_s3_parts"))
+      .setDesc(t("settings_s3_parts_desc"))
+      .addDropdown((dropdown) => {
+        dropdown.addOption("1", "1");
+        dropdown.addOption("2", "2");
+        dropdown.addOption("3", "3");
+        dropdown.addOption("5", "5");
+        dropdown.addOption("10", "10");
+        dropdown.addOption("15", "15");
+        dropdown.addOption("20", "20 (default)");
+
+        dropdown
+          .setValue(`${this.plugin.settings.s3.partsConcurrency}`)
+          .onChange(async (val) => {
+            const realVal = Number.parseInt(val);
+            this.plugin.settings.s3.partsConcurrency = realVal;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(s3Div)
+      .setName(t("settings_s3_accuratemtime"))
+      .setDesc(t("settings_s3_accuratemtime_desc"))
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption("disable", t("disable"))
+          .addOption("enable", t("enable"));
+
+        dropdown
+          .setValue(
+            `${this.plugin.settings.s3.useAccurateMTime ? "enable" : "disable"}`
+          )
+          .onChange(async (val) => {
+            if (val === "enable") {
+              this.plugin.settings.s3.useAccurateMTime = true;
+            } else {
+              this.plugin.settings.s3.useAccurateMTime = false;
+            }
+            await this.plugin.saveSettings();
+          });
+      });
+
+    let newS3RemotePrefix = this.plugin.settings.s3.remotePrefix || "";
+    new Setting(s3Div)
+      .setName(t("settings_remoteprefix_s3"))
+      .setDesc(t("settings_remoteprefix_s3_desc"))
+      .addText((text) =>
+        text
+          .setPlaceholder("")
+          .setValue(newS3RemotePrefix)
+          .onChange((value) => {
+            newS3RemotePrefix = simpleTransRemotePrefix(value.trim());
+          })
+      )
+      .addButton((button) => {
+        button.setButtonText(t("confirm"));
+        button.onClick(() => {
+          new ChangeS3RemotePrefixModal(
+            this.app,
+            this.plugin,
+            simpleTransRemotePrefix(newS3RemotePrefix.trim())
+          ).open();
+        });
+      });
+    new Setting(s3Div)
+      .setName(t("settings_s3_reverse_proxy_no_sign_url"))
+      .setDesc(t("settings_s3_reverse_proxy_no_sign_url_desc"))
+      .addText((text) =>
+        text
+          .setPlaceholder("")
+          .setValue(this.plugin.settings.s3.reverseProxyNoSignUrl ?? "")
+          .onChange(async (value) => {
+            this.plugin.settings.s3.reverseProxyNoSignUrl = value.trim();
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(s3Div)
+      .setName(t("settings_s3_generatefolderobject"))
+      .setDesc(t("settings_s3_generatefolderobject_desc"))
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption(
+            "notgenerate",
+            t("settings_s3_generatefolderobject_notgenerate")
+          )
+          .addOption(
+            "generate",
+            t("settings_s3_generatefolderobject_generate")
+          );
+
+        dropdown
+          .setValue(
+            `${
+              this.plugin.settings.s3.generateFolderObject
+                ? "generate"
+                : "notgenerate"
+            }`
+          )
+          .onChange(async (val) => {
+            if (val === "generate") {
+              this.plugin.settings.s3.generateFolderObject = true;
+            } else {
+              this.plugin.settings.s3.generateFolderObject = false;
+            }
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(s3Div)
+      .setName(t("settings_checkonnectivity"))
+      .setDesc(t("settings_checkonnectivity_desc"))
+      .addButton(async (button) => {
+        button.setButtonText(t("settings_checkonnectivity_button"));
+        button.onClick(async () => {
+          new Notice(t("settings_checkonnectivity_checking"));
+          const client = getClient(
+            this.plugin.settings,
+            this.app.vault.getName(),
+            () => this.plugin.saveSettings()
+          );
+          const errors = { msg: "" };
+          const res = await client.checkConnect((err: any) => {
+            errors.msg = err;
+          });
+          if (res) {
+            new Notice(t("settings_s3_connect_succ"));
+          } else {
+            new Notice(t("settings_s3_connect_fail"));
+            new Notice(errors.msg);
+          }
+        });
+      });
+
+    //////////////////////////////////////////////////
+    // below for googledrive
+    //////////////////////////////////////////////////
+
+    const {
+      googleDriveDiv,
+      googleDriveAllowedToUsedDiv,
+      googleDriveNotShowUpHintSetting,
+    } = generateGoogleDriveSettingsPart(
+      containerEl,
+      t,
+      this.app,
+      this.plugin,
+      () => this.plugin.saveSettings()
+    );
+    googleDriveDiv.style.display =
+      this.plugin.settings.serviceType === "googledrive" ? "" : "none";
+    googleDriveDiv.toggleClass(
+      "googledrive-hide",
+      this.plugin.settings.serviceType !== "googledrive"
+    );
+
+    //////////////////////////////////////////////////
+    // below for general chooser (part 2/2)
+    //////////////////////////////////////////////////
+
+    // we need to create chooser
+    // after all service-div-s being created
+    new Setting(serviceChooserDiv)
+      .setName(t("settings_chooseservice"))
+      .setDesc(t("settings_chooseservice_desc"))
+      .addDropdown(async (dropdown) => {
+        dropdown.addOption("s3", t("settings_chooseservice_s3"));
+        dropdown.addOption("googledrive", "Google Drive");
+
+        dropdown
+          .setValue(this.plugin.settings.serviceType)
+          .onChange(async (val) => {
+            this.plugin.settings.serviceType = val as SUPPORTED_SERVICES_TYPE;
+            const isS3 = this.plugin.settings.serviceType === "s3";
+            const isGDrive = this.plugin.settings.serviceType === "googledrive";
+
+            s3Div.style.display = isS3 ? "" : "none";
+            s3Div.toggleClass("s3-hide", !isS3);
+
+            googleDriveDiv.style.display = isGDrive ? "" : "none";
+            googleDriveDiv.toggleClass("googledrive-hide", !isGDrive);
+
+            await this.plugin.saveSettings();
+          });
+      });
+
+    //////////////////////////////////////////////////
+    // below for basic settings
+    //////////////////////////////////////////////////
+
+    const basicDiv = containerEl.createEl("div");
+    basicDiv.createEl("h2", { text: t("settings_basic") });
+
+    new Setting(basicDiv)
+      .setName(t("settings_autorun"))
+      .setDesc(t("settings_autorun_desc"))
+      .addDropdown((dropdown) => {
+        dropdown.addOption("-1", t("settings_autorun_notset"));
+        dropdown.addOption(`${1000 * 60 * 1}`, t("settings_autorun_1min"));
+        dropdown.addOption(`${1000 * 60 * 5}`, t("settings_autorun_5min"));
+        dropdown.addOption(`${1000 * 60 * 10}`, t("settings_autorun_10min"));
+        dropdown.addOption(`${1000 * 60 * 30}`, t("settings_autorun_30min"));
+
+        dropdown
+          .setValue(`${this.plugin.settings.autoRunEveryMilliseconds}`)
+          .onChange(async (val: string) => {
+            const realVal = Number.parseInt(val);
+            this.plugin.settings.autoRunEveryMilliseconds = realVal;
+            await this.plugin.saveSettings();
+            if (
+              (realVal === undefined || realVal === null || realVal <= 0) &&
+              this.plugin.autoRunIntervalID !== undefined
+            ) {
+              // clear
+              window.clearInterval(this.plugin.autoRunIntervalID);
+              this.plugin.autoRunIntervalID = undefined;
+            } else if (
+              realVal !== undefined &&
+              realVal !== null &&
+              realVal > 0
+            ) {
+              const intervalID = window.setInterval(() => {
+                console.info("auto run from settings.ts");
+                this.plugin.syncRun("auto");
+              }, realVal);
+              this.plugin.autoRunIntervalID = intervalID;
+              this.plugin.registerInterval(intervalID);
+            }
+          });
+      });
+
+    new Setting(basicDiv)
+      .setName(t("settings_runoncestartup"))
+      .setDesc(t("settings_runoncestartup_desc"))
+      .addDropdown((dropdown) => {
+        dropdown.addOption("-1", t("settings_runoncestartup_notset"));
+        dropdown.addOption(
+          `${1000 * 1 * 1}`,
+          t("settings_runoncestartup_1sec")
+        );
+        dropdown.addOption(
+          `${1000 * 10 * 1}`,
+          t("settings_runoncestartup_10sec")
+        );
+        dropdown.addOption(
+          `${1000 * 30 * 1}`,
+          t("settings_runoncestartup_30sec")
+        );
+        dropdown
+          .setValue(`${this.plugin.settings.initRunAfterMilliseconds}`)
+          .onChange(async (val: string) => {
+            const realVal = Number.parseInt(val);
+            this.plugin.settings.initRunAfterMilliseconds = realVal;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(basicDiv)
+      .setName(t("settings_synconsave"))
+      .setDesc(t("settings_synconsave_desc"))
+      .addDropdown((dropdown) => {
+        dropdown.addOption("-1", t("settings_synconsave_disable"));
+        dropdown.addOption("1000", t("settings_synconsave_enable"));
+        // for backward compatibility, we need to use a number representing seconds
+        let syncOnSaveEnabled = false;
+        if ((this.plugin.settings.syncOnSaveAfterMilliseconds ?? -1) > 0) {
+          syncOnSaveEnabled = true;
+        }
+        dropdown
+          .setValue(`${syncOnSaveEnabled ? "1000" : "-1"}`)
+          .onChange(async (val: string) => {
+            this.plugin.settings.syncOnSaveAfterMilliseconds =
+              Number.parseInt(val);
+            await this.plugin.saveSettings();
+            this.plugin.toggleSyncOnSaveIfSet();
+          });
+      });
+
+    new Setting(basicDiv)
+      .setName(t("settings_skiplargefiles"))
+      .setDesc(t("settings_skiplargefiles_desc"))
+      .addDropdown((dropdown) => {
+        dropdown.addOption("-1", t("settings_skiplargefiles_notset"));
+
+        const mbs = [1, 5, 10, 20, 50, 100, 200, 500, 1000];
+        for (const mb of mbs) {
+          dropdown.addOption(`${mb * 1000 * 1000}`, `${mb} MB`);
+        }
+        dropdown
+          .setValue(`${this.plugin.settings.skipSizeLargerThan}`)
+          .onChange(async (val) => {
+            this.plugin.settings.skipSizeLargerThan = Number.parseInt(val);
+            await this.plugin.saveSettings();
+          });
+      });
+
+    // custom status bar items is not supported on mobile
+    if (!Platform.isMobileApp) {
+      new Setting(basicDiv)
+        .setName(t("settings_enablestatusbar_info"))
+        .setDesc(t("settings_enablestatusbar_info_desc"))
+        .addToggle((toggle) => {
+          toggle
+            .setValue(this.plugin.settings.enableStatusBarInfo ?? false)
+            .onChange(async (val) => {
+              this.plugin.settings.enableStatusBarInfo = val;
+              await this.plugin.saveSettings();
+              new Notice(t("settings_enablestatusbar_reloadrequired_notice"));
+            });
+        });
+
+      new Setting(basicDiv)
+        .setName(t("settings_resetstatusbar_time"))
+        .setDesc(t("settings_resetstatusbar_time_desc"))
+        .addButton((button) => {
+          button.setButtonText(t("settings_resetstatusbar_button"));
+          button.onClick(async () => {
+            // reset last sync time
+            await upsertLastSuccessSyncTimeByVault(
+              this.plugin.db,
+              this.plugin.vaultRandomID,
+              -1
+            );
+            await upsertLastFailedSyncTimeByVault(
+              this.plugin.db,
+              this.plugin.vaultRandomID,
+              -1
+            );
+            this.plugin.updateLastSyncMsg(undefined, "not_syncing", null, null);
+            new Notice(t("settings_resetstatusbar_notice"));
+          });
+        });
+    }
+
+    new Setting(basicDiv)
+      .setName(t("settings_ignorepaths"))
+      .setDesc(t("settings_ignorepaths_desc"))
+      .setClass("ignorepaths-settings")
+
+      .addTextArea((textArea) => {
+        textArea
+          .setValue(`${(this.plugin.settings.ignorePaths ?? []).join("\n")}`)
+          .onChange(async (value) => {
+            this.plugin.settings.ignorePaths = value
+              .trim()
+              .split("\n")
+              .filter((x) => x.trim() !== "");
+            await this.plugin.saveSettings();
+          });
+        textArea.inputEl.rows = 10;
+        textArea.inputEl.cols = 30;
+
+        textArea.inputEl.addClass("ignorepaths-textarea");
+      });
+
+    new Setting(basicDiv)
+      .setName(t("settings_onlyallowpaths"))
+      .setDesc(t("settings_onlyallowpaths_desc"))
+      .setClass("onlyallowpaths-settings")
+
+      .addTextArea((textArea) => {
+        textArea
+          .setValue(`${(this.plugin.settings.onlyAllowPaths ?? []).join("\n")}`)
+          .onChange(async (value) => {
+            this.plugin.settings.onlyAllowPaths = value
+              .trim()
+              .split("\n")
+              .filter((x) => x.trim() !== "");
+            await this.plugin.saveSettings();
+          });
+        textArea.inputEl.rows = 10;
+        textArea.inputEl.cols = 30;
+
+        textArea.inputEl.addClass("onlyallowpaths-textarea");
+      });
+
+    //////////////////////////////////////////////////
+    // below for advanced settings
+    //////////////////////////////////////////////////
+    const advDiv = containerEl.createEl("div");
+    advDiv.createEl("h2", {
+      text: t("settings_adv"),
+    });
+
+    new Setting(advDiv)
+      .setName(t("settings_concurrency"))
+      .setDesc(t("settings_concurrency_desc"))
+      .addDropdown((dropdown) => {
+        dropdown.addOption("1", "1");
+        dropdown.addOption("2", "2");
+        dropdown.addOption("3", "3");
+        dropdown.addOption("5", "5 (default)");
+        dropdown.addOption("10", "10");
+        dropdown.addOption("15", "15");
+        dropdown.addOption("20", "20");
+
+        dropdown
+          .setValue(`${this.plugin.settings.concurrency}`)
+          .onChange(async (val) => {
+            const realVal = Number.parseInt(val);
+            this.plugin.settings.concurrency = realVal;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(advDiv)
+      .setName(t("settings_syncunderscore"))
+      .setDesc(t("settings_syncunderscore_desc"))
+      .addDropdown((dropdown) => {
+        dropdown.addOption("disable", t("disable"));
+        dropdown.addOption("enable", t("enable"));
+        dropdown
+          .setValue(
+            `${this.plugin.settings.syncUnderscoreItems ? "enable" : "disable"}`
+          )
+          .onChange(async (val) => {
+            this.plugin.settings.syncUnderscoreItems = val === "enable";
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(advDiv)
+      .setName(t("settings_configdir"))
+      .setDesc(
+        t("settings_configdir_desc", {
+          configDir: this.app.vault.configDir,
+        })
+      )
+      .addDropdown((dropdown) => {
+        dropdown.addOption("disable", t("disable"));
+        dropdown.addOption("enable", t("enable"));
+
+        const bridge = {
+          secondConfirm: false,
+        };
+        dropdown
+          .setValue(
+            `${this.plugin.settings.syncConfigDir ? "enable" : "disable"}`
+          )
+          .onChange(async (val) => {
+            if (val === "enable" && !bridge.secondConfirm) {
+              dropdown.setValue("disable");
+              new SyncConfigDirModal(this.app, this.plugin, () => {
+                bridge.secondConfirm = true;
+                dropdown.setValue("enable");
+              }).open();
+            } else {
+              bridge.secondConfirm = false;
+              this.plugin.settings.syncConfigDir = false;
+              await this.plugin.saveSettings();
+            }
+          });
+      });
+
+    new Setting(advDiv)
+      .setName(t("settings_bookmarks"))
+      .setDesc(
+        t("settings_bookmarks_desc", {
+          configDir: this.app.vault.configDir,
+        })
+      )
+      .addDropdown((dropdown) => {
+        dropdown.addOption("disable", t("disable"));
+        dropdown.addOption("enable", t("enable"));
+
+        dropdown
+          .setValue(
+            `${this.plugin.settings.syncBookmarks ? "enable" : "disable"}`
+          )
+          .onChange(async (val) => {
+            this.plugin.settings.syncBookmarks = val === "enable";
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(advDiv)
+      .setName(t("settings_deletetowhere"))
+      .setDesc(t("settings_deletetowhere_desc"))
+      .addDropdown((dropdown) => {
+        dropdown.addOption("system", t("settings_deletetowhere_system_trash"));
+        dropdown.addOption(
+          "obsidian",
+          t("settings_deletetowhere_obsidian_trash")
+        );
+        dropdown
+          .setValue(this.plugin.settings.deleteToWhere ?? "system")
+          .onChange(async (val) => {
+            this.plugin.settings.deleteToWhere = val as "system" | "obsidian";
+            await this.plugin.saveSettings();
+          });
+      });
+
+    let conflictActionSettingOrigDesc = t("settings_conflictaction_desc");
+    if (
+      (this.plugin.settings.conflictAction ?? "keep_newer") === "smart_conflict"
+    ) {
+      conflictActionSettingOrigDesc += t(
+        "settings_conflictaction_smart_conflict_desc"
+      );
+    }
+    const conflictActionSetting = new Setting(advDiv)
+      .setName(t("settings_conflictaction"))
+      .setDesc(stringToFragment(conflictActionSettingOrigDesc));
+    conflictActionSetting.addDropdown((dropdown) => {
+      dropdown
+        .addOption("keep_newer", t("settings_conflictaction_keep_newer"))
+        .addOption("keep_larger", t("settings_conflictaction_keep_larger"))
+        .addOption(
+          "smart_conflict",
+          t("settings_conflictaction_smart_conflict")
+        )
+        .setValue(this.plugin.settings.conflictAction ?? "keep_newer")
+        .onChange(async (val) => {
+          this.plugin.settings.conflictAction = val as ConflictActionType;
+          await this.plugin.saveSettings();
+
+          conflictActionSettingOrigDesc = t("settings_conflictaction_desc");
+          if (
+            (this.plugin.settings.conflictAction ?? "keep_newer") ===
+            "smart_conflict"
+          ) {
+            conflictActionSettingOrigDesc += t(
+              "settings_conflictaction_smart_conflict_desc"
+            );
+          }
+          conflictActionSetting.setDesc(
+            stringToFragment(conflictActionSettingOrigDesc)
+          );
+        });
+    });
+
+    generateClearDupFilesSettingsPart(advDiv, t, this.app, this.plugin);
+
+    const percentage1 = new Setting(advDiv)
+      .setName(t("settings_protectmodifypercentage"))
+      .setDesc(t("settings_protectmodifypercentage_desc"));
+
+    const percentage2 = new Setting(advDiv)
+      .setName(t("settings_protectmodifypercentage_customfield"))
+      .setDesc(t("settings_protectmodifypercentage_customfield_desc"));
+    if ((this.plugin.settings.protectModifyPercentage ?? 50) % 10 === 0) {
+      percentage2.settingEl.addClass("settings-percentage-custom-hide");
+    }
+    let percentage2Text: TextComponent | undefined = undefined;
+    percentage2.addText((text) => {
+      text.inputEl.type = "number";
+      percentage2Text = text;
+      text
+        .setPlaceholder("0 ~ 100")
+        .setValue(`${this.plugin.settings.protectModifyPercentage ?? 50}`)
+        .onChange(async (val) => {
+          let k = Number.parseFloat(val.trim());
+          if (Number.isNaN(k)) {
+            // do nothing!
+          } else {
+            if (k < 0) {
+              k = 0;
+            } else if (k > 100) {
+              k = 100;
+            }
+            this.plugin.settings.protectModifyPercentage = k;
+            await this.plugin.saveSettings();
+          }
+        });
+    });
+
+    percentage1.addDropdown((dropdown) => {
+      for (const i of Array.from({ length: 11 }, (x, i) => i * 10)) {
+        let desc = `${i}`;
+        if (i === 0) {
+          desc = t("settings_protectmodifypercentage_000_desc");
+        } else if (i === 50) {
+          desc = t("settings_protectmodifypercentage_050_desc");
+        } else if (i === 100) {
+          desc = t("settings_protectmodifypercentage_100_desc");
+        }
+        dropdown.addOption(`${i}`, desc);
+      }
+      dropdown.addOption(
+        "custom",
+        t("settings_protectmodifypercentage_custom_desc")
+      );
+
+      const p = this.plugin.settings.protectModifyPercentage ?? 50;
+      let initVal = "custom";
+      if (p % 10 === 0) {
+        initVal = `${p}`;
+      } else {
+        // show custom
+        percentage2.settingEl.removeClass("settings-percentage-custom");
+      }
+      dropdown.setValue(initVal).onChange(async (val) => {
+        const k = Number.parseInt(val);
+        if (val === "custom" || Number.isNaN(k)) {
+          // do nothing until user changes something in custom field
+          percentage2.settingEl.removeClass("settings-percentage-custom-hide");
+        } else {
+          this.plugin.settings.protectModifyPercentage = k;
+          percentage2.settingEl.addClass("settings-percentage-custom-hide");
+          percentage2Text?.setValue(`${k}`);
+          await this.plugin.saveSettings();
+        }
+      });
+    });
+
+    new Setting(advDiv)
+      .setName(t("setting_syncdirection"))
+      .setDesc(stringToFragment(t("setting_syncdirection_desc")))
+      .addDropdown((dropdown) => {
+        dropdown.addOption(
+          "bidirectional",
+          t("setting_syncdirection_bidirectional_desc")
+        );
+        dropdown.addOption(
+          "incremental_push_only",
+          t("setting_syncdirection_incremental_push_only_desc")
+        );
+        dropdown.addOption(
+          "incremental_pull_only",
+          t("setting_syncdirection_incremental_pull_only_desc")
+        );
+        dropdown.addOption(
+          "incremental_push_and_delete_only",
+          t("setting_syncdirection_incremental_push_and_delete_only_desc")
+        );
+        dropdown.addOption(
+          "incremental_pull_and_delete_only",
+          t("setting_syncdirection_incremental_pull_and_delete_only_desc")
+        );
+
+        dropdown
+          .setValue(this.plugin.settings.syncDirection ?? "bidirectional")
+          .onChange(async (val) => {
+            this.plugin.settings.syncDirection = val as SyncDirectionType;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    if (Platform.isMobile) {
+      new Setting(advDiv)
+        .setName(t("settings_enablemobilestatusbar"))
+        .setDesc(t("settings_enablemobilestatusbar_desc"))
+        .addDropdown(async (dropdown) => {
+          dropdown
+            .addOption("enable", t("enable"))
+            .addOption("disable", t("disable"));
+
+          dropdown
+            .setValue(
+              `${
+                this.plugin.settings.enableMobileStatusBar
+                  ? "enable"
+                  : "disable"
+              }`
+            )
+            .onChange(async (val) => {
+              if (val === "enable") {
+                this.plugin.settings.enableMobileStatusBar = true;
+                this.plugin.appContainerObserver =
+                  changeMobileStatusBar("enable");
+              } else {
+                this.plugin.settings.enableMobileStatusBar = false;
+                changeMobileStatusBar(
+                  "disable",
+                  this.plugin.appContainerObserver
+                );
+                this.plugin.appContainerObserver?.disconnect();
+                this.plugin.appContainerObserver = undefined;
+              }
+              await this.plugin.saveSettings();
+            });
+        });
+    }
+
+    //////////////////////////////////////////////////
+    // below for import and export functions
+    //////////////////////////////////////////////////
+
+    // import and export
+    const importExportDiv = containerEl.createEl("div");
+    importExportDiv.createEl("h2", {
+      text: t("settings_importexport"),
+    });
+
+    const importExportDivSetting1 = new Setting(importExportDiv)
+      .setName(t("settings_export"))
+      .setDesc(t("settings_export_desc"));
+    importExportDivSetting1.settingEl.addClass("setting-need-wrapping");
+    importExportDivSetting1
+      .addButton(async (button) => {
+        button.setButtonText(t("settings_export_basic_and_advanced_button"));
+        button.onClick(async () => {
+          new ExportSettingsQrCodeModal(
+            this.app,
+            this.plugin,
+            "basic_and_advanced"
+          ).open();
+        });
+      })
+      .addButton(async (button) => {
+        button.setButtonText(t("settings_export_s3_button"));
+        button.onClick(async () => {
+          new ExportSettingsQrCodeModal(this.app, this.plugin, "s3").open();
+        });
+      })
+      .addButton(async (button) => {
+        button.setButtonText(t("settings_export_googledrive_button"));
+        button.onClick(async () => {
+          new ExportSettingsQrCodeModal(
+            this.app,
+            this.plugin,
+            "googledrive"
+          ).open();
+        });
+      });
+
+    let importSettingVal = "";
+    new Setting(importExportDiv)
+      .setName(t("settings_import"))
+      .setDesc(t("settings_import_desc"))
+      .addText((text) =>
+        text
+          .setPlaceholder("obsidian://vicsync?func=settings&...")
+          .setValue("")
+          .onChange((val) => {
+            importSettingVal = val;
+          })
+      )
+      .addButton(async (button) => {
+        button.setButtonText(t("confirm"));
+        button.onClick(async () => {
+          if (importSettingVal !== "") {
+            // console.debug(importSettingVal);
+            try {
+              const inputParams = parseUriByHand(importSettingVal);
+              const parsed = importQrCodeUri(
+                inputParams,
+                this.app.vault.getName()
+              );
+              if (parsed.status === "error") {
+                new Notice(parsed.message);
+              } else {
+                const copied = cloneDeep(parsed.result);
+                // new Notice(JSON.stringify(copied))
+                this.plugin.settings = Object.assign(
+                  {},
+                  this.plugin.settings,
+                  copied
+                );
+                this.plugin.saveSettings();
+                new Notice(
+                  t("protocol_saveqr", {
+                    manifestName: this.plugin.manifest.name,
+                  })
+                );
+              }
+            } catch (e) {
+              new Notice(`${e}`);
+            }
+
+            importSettingVal = "";
+          } else {
+            new Notice(t("settings_import_error_notice"));
+            importSettingVal = "";
+          }
+        });
+      });
+
+    //////////////////////////////////////////////////
+    // below for debug
+    //////////////////////////////////////////////////
+
+    const debugDiv = containerEl.createEl("div");
+    debugDiv.createEl("h2", { text: t("settings_debug") });
+
+    new Setting(debugDiv)
+      .setName(t("settings_debuglevel"))
+      .setDesc(t("settings_debuglevel_desc"))
+      .addDropdown(async (dropdown) => {
+        dropdown.addOption("info", "info");
+        dropdown.addOption("debug", "debug");
+        dropdown
+          .setValue(this.plugin.settings.currLogLevel ?? "info")
+          .onChange(async (val: string) => {
+            this.plugin.settings.currLogLevel = val;
+            await this.plugin.saveSettings();
+            console.info(`the log level is changed to ${val}`);
+          });
+      });
+
+    new Setting(debugDiv)
+      .setName(t("settings_outputsettingsconsole"))
+      .setDesc(t("settings_outputsettingsconsole_desc"))
+      .addButton(async (button) => {
+        button.setButtonText(t("settings_outputsettingsconsole_button"));
+        button.onClick(async () => {
+          console.info(this.plugin.settings);
+          new Notice(t("settings_outputsettingsconsole_notice"));
+        });
+      });
+
+    new Setting(debugDiv)
+      .setName(t("settings_viewconsolelog"))
+      .setDesc(stringToFragment(t("settings_viewconsolelog_desc")));
+
+    const debugDivExportSyncPlans = new Setting(debugDiv)
+      .setName(t("settings_syncplans"))
+      .setDesc(t("settings_syncplans_desc"));
+    debugDivExportSyncPlans.settingEl.addClass("setting-need-wrapping");
+    debugDivExportSyncPlans
+      .addButton(async (button) => {
+        button.setButtonText(t("settings_syncplans_button_1_only_change"));
+        button.onClick(async () => {
+          await exportVaultSyncPlansToFiles(
+            this.plugin.db,
+            this.app.vault,
+            this.plugin.vaultRandomID,
+            1,
+            true
+          );
+          new Notice(t("settings_syncplans_notice"));
+        });
+      })
+      .addButton(async (button) => {
+        button.setButtonText(t("settings_syncplans_button_5_only_change"));
+        button.onClick(async () => {
+          await exportVaultSyncPlansToFiles(
+            this.plugin.db,
+            this.app.vault,
+            this.plugin.vaultRandomID,
+            5,
+            true
+          );
+          new Notice(t("settings_syncplans_notice"));
+        });
+      })
+      .addButton(async (button) => {
+        button.setButtonText(t("settings_syncplans_button_1"));
+        button.onClick(async () => {
+          await exportVaultSyncPlansToFiles(
+            this.plugin.db,
+            this.app.vault,
+            this.plugin.vaultRandomID,
+            1,
+            false
+          );
+          new Notice(t("settings_syncplans_notice"));
+        });
+      })
+      .addButton(async (button) => {
+        button.setButtonText(t("settings_syncplans_button_5"));
+        button.onClick(async () => {
+          await exportVaultSyncPlansToFiles(
+            this.plugin.db,
+            this.app.vault,
+            this.plugin.vaultRandomID,
+            5,
+            false
+          );
+          new Notice(t("settings_syncplans_notice"));
+        });
+      })
+      .addButton(async (button) => {
+        button.setButtonText(t("settings_syncplans_button_all"));
+        button.onClick(async () => {
+          await exportVaultSyncPlansToFiles(
+            this.plugin.db,
+            this.app.vault,
+            this.plugin.vaultRandomID,
+            -1,
+            false
+          );
+          new Notice(t("settings_syncplans_notice"));
+        });
+      });
+
+    new Setting(debugDiv)
+      .setName(t("settings_delsyncplans"))
+      .setDesc(t("settings_delsyncplans_desc"))
+      .addButton(async (button) => {
+        button.setButtonText(t("settings_delsyncplans_button"));
+        button.onClick(async () => {
+          await clearAllSyncPlanRecords(this.plugin.db);
+          new Notice(t("settings_delsyncplans_notice"));
+        });
+      });
+
+    new Setting(debugDiv)
+      .setName(t("settings_delprevsync"))
+      .setDesc(t("settings_delprevsync_desc"))
+      .addButton(async (button) => {
+        button.setButtonText(t("settings_delprevsync_button"));
+        button.onClick(async () => {
+          await clearAllPrevSyncRecordByVault(
+            this.plugin.db,
+            this.plugin.vaultRandomID
+          );
+          new Notice(t("settings_delprevsync_notice"));
+        });
+      });
+
+    new Setting(debugDiv)
+      .setName(t("settings_profiler_results"))
+      .setDesc(t("settings_profiler_results_desc"))
+      .addButton(async (button) => {
+        button.setButtonText(t("settings_profiler_results_button_all"));
+        button.onClick(async () => {
+          await exportVaultProfilerResultsToFiles(
+            this.plugin.db,
+            this.app.vault,
+            this.plugin.vaultRandomID
+          );
+          new Notice(t("settings_profiler_results_notice"));
+        });
+      });
+
+    new Setting(debugDiv)
+      .setName(t("settings_profiler_enableprofiler"))
+      .setDesc(t("settings_profiler_enableprofiler_desc"))
+      .addDropdown((dropdown) => {
+        dropdown.addOption("enable", t("enable"));
+        dropdown.addOption("disable", t("disable"));
+        dropdown
+          .setValue(
+            this.plugin.settings.profiler?.enable ? "enable" : "disable"
+          )
+          .onChange(async (val: string) => {
+            if (this.plugin.settings.profiler === undefined) {
+              this.plugin.settings.profiler = DEFAULT_PROFILER_CONFIG;
+            }
+            this.plugin.settings.profiler.enable = val === "enable";
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(debugDiv)
+      .setName(t("settings_profiler_enabledebugprint"))
+      .setDesc(t("settings_profiler_enabledebugprint_desc"))
+      .addDropdown((dropdown) => {
+        dropdown.addOption("enable", t("enable"));
+        dropdown.addOption("disable", t("disable"));
+        dropdown
+          .setValue(
+            this.plugin.settings.profiler?.enablePrinting ? "enable" : "disable"
+          )
+          .onChange(async (val: string) => {
+            if (this.plugin.settings.profiler === undefined) {
+              this.plugin.settings.profiler = DEFAULT_PROFILER_CONFIG;
+            }
+            this.plugin.settings.profiler.enablePrinting = val === "enable";
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(debugDiv)
+      .setName(t("settings_profiler_recordsize"))
+      .setDesc(t("settings_profiler_recordsize_desc"))
+      .addDropdown((dropdown) => {
+        dropdown.addOption("enable", t("enable"));
+        dropdown.addOption("disable", t("disable"));
+        dropdown
+          .setValue(
+            this.plugin.settings.profiler?.recordSize ? "enable" : "disable"
+          )
+          .onChange(async (val: string) => {
+            if (this.plugin.settings.profiler === undefined) {
+              this.plugin.settings.profiler = DEFAULT_PROFILER_CONFIG;
+            }
+            this.plugin.settings.profiler.recordSize = val === "enable";
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(debugDiv)
+      .setName(t("settings_outputbasepathvaultid"))
+      .setDesc(t("settings_outputbasepathvaultid_desc"))
+      .addButton(async (button) => {
+        button.setButtonText(t("settings_outputbasepathvaultid_button"));
+        button.onClick(async () => {
+          new Notice(this.plugin.getVaultBasePath());
+          new Notice(this.plugin.vaultRandomID);
+        });
+      });
+
+    new Setting(debugDiv)
+      .setName(t("settings_resetcache"))
+      .setDesc(t("settings_resetcache_desc"))
+      .addButton(async (button) => {
+        button.setButtonText(t("settings_resetcache_button"));
+        button.onClick(async () => {
+          await destroyDBs();
+          new Notice(t("settings_resetcache_notice"));
+          this.plugin.unload();
+        });
+      });
+  }
+
+  hide() {
+    const { containerEl } = this;
+    containerEl.empty();
+    super.hide();
+  }
+}

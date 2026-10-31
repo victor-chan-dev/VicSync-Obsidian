@@ -1,10 +1,31 @@
 /**
- * Only type defs here.
+ * Only type defs and constants here.
  * To avoid circular dependency.
  */
 
-import type { GoogleDriveConfig } from "../pro/src/baseTypesPro";
-import type { LangTypeAndAuto } from "./i18n";
+import type { LangTypeAndAuto } from "./utils/i18n";
+
+declare global {
+  var DEFAULT_GOOGLEDRIVE_CLIENT_ID: string;
+  var DEFAULT_GOOGLEDRIVE_CLIENT_SECRET: string;
+}
+
+export const MERGABLE_SIZE = 1000 * 1000; // 1 MB
+
+export interface GoogleDriveConfig {
+  accessToken: string;
+  accessTokenExpiresInMs: number;
+  accessTokenExpiresAtTimeMs: number;
+  refreshToken: string;
+  remoteBaseDir?: string;
+  credentialsShouldBeDeletedAtTimeMs?: number;
+  scope: "https://www.googleapis.com/auth/drive";
+  kind: "googledrive";
+}
+
+export const GOOGLEDRIVE_CLIENT_ID = global.DEFAULT_GOOGLEDRIVE_CLIENT_ID;
+export const GOOGLEDRIVE_CLIENT_SECRET =
+  global.DEFAULT_GOOGLEDRIVE_CLIENT_SECRET;
 
 export const DEFAULT_CONTENT_TYPE = "application/octet-stream";
 
@@ -129,6 +150,8 @@ export type DecisionTypeForMixedEntity =
   | "remote_is_deleted_thus_also_delete_local"
   | "remote_is_moved_source"
   | "remote_is_moved_then_rename_local"
+  | "local_is_moved_source"
+  | "local_is_moved_then_rename_remote"
   | "conflict_created_then_keep_local"
   | "conflict_created_then_keep_remote"
   | "conflict_created_then_smart_conflict"
@@ -162,7 +185,7 @@ export interface Entity {
   mtimeSvrFmt?: string;
   prevSyncTime?: number;
   prevSyncTimeFmt?: string;
-  size?: number; // might be unknown or to be filled
+  size?: number;
   sizeEnc?: number;
   sizeRaw: number;
   hash?: string;
