@@ -266,3 +266,4 @@ export class SyncPlanPreviewModal extends Modal {
     contentEl.empty();
   }
 }
+
