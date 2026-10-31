@@ -1,6 +1,6 @@
 {
   "name": "vicsync",
-  "version": "0.5.41",
+  "version": "0.5.42",
   "description": "VicSync: A custom sync plugin for Obsidian (Google Drive & S3).",
   "scripts": {
     "dev": "node esbuild.config.mjs --watch",
