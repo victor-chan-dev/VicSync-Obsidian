@@ -456,6 +456,8 @@ export const isSpecialFolderNameToSkip = (
     "Desktop.ini",
     "thumbs.db",
     "Thumbs.db",
+    "_vicsync_debug.md",
+    "_debug_remotely_save",
   ].concat(more !== undefined ? more : []);
   for (const iterator of specialFolders) {
     if (

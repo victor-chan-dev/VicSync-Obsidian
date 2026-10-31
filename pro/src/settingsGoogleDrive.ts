@@ -125,6 +125,7 @@ class GoogleDriveAuthModal extends Modal {
             new Notice(t("modal_googledrive_maualinput_succ_notice"));
           } catch (e) {
             console.error(e);
+            await this.plugin.logDebugError("GoogleDriveAuthModal", e);
             new Notice(t("modal_googledrive_maualinput_fail_notice"));
           } finally {
             this.authDiv.toggleClass(
@@ -405,13 +406,18 @@ export const generateGoogleDriveSettingsPart = (
         const client = getClient(plugin.settings, app.vault.getName(), () =>
           plugin.saveSettings()
         );
-        const errors = { msg: "" };
+        const errors: { msg: string; raw?: unknown } = { msg: "" };
         const res = await client.checkConnect((err: any) => {
           errors.msg = `${err}`;
+          errors.raw = err;
         });
         if (res) {
           new Notice(t("settings_googledrive_connect_succ"));
         } else {
+          await plugin.logDebugError(
+            "GoogleDriveCheckConnectivity",
+            errors.raw ?? errors.msg
+          );
           new Notice(t("settings_googledrive_connect_fail"));
           new Notice(errors.msg);
         }

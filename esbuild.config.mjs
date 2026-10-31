@@ -32,6 +32,16 @@ const DEFAULT_YANDEXDISK_CLIENT_SECRET =
 const DEFAULT_KOOFR_CLIENT_ID = process.env.KOOFR_CLIENT_ID || "";
 const DEFAULT_KOOFR_CLIENT_SECRET = process.env.KOOFR_CLIENT_SECRET || "";
 
+if (
+  prod &&
+  (!DEFAULT_GOOGLEDRIVE_CLIENT_ID || !DEFAULT_GOOGLEDRIVE_CLIENT_SECRET)
+) {
+  console.error(
+    "ERROR: GOOGLEDRIVE_CLIENT_ID and GOOGLEDRIVE_CLIENT_SECRET must be set for production builds!"
+  );
+  process.exit(1);
+}
+
 esbuild
   .context({
     banner: {

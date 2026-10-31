@@ -19,8 +19,6 @@ jobs:
       (!contains(github.event.head_commit.message, '[skip ci]') &&
        !startsWith(github.event.head_commit.message, 'chore: release'))
 
-    environment: env-for-buildci
-
     env:
       DROPBOX_APP_KEY: ${{secrets.DROPBOX_APP_KEY}}
       ONEDRIVE_CLIENT_ID: ${{secrets.ONEDRIVE_CLIENT_ID}}

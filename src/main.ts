@@ -76,10 +76,14 @@ import {
   COMMAND_CALLBACK_DROPBOX,
   COMMAND_CALLBACK_ONEDRIVE,
   COMMAND_URI,
+  DEFAULT_DEBUG_LOG_FILE,
 } from "./baseTypes";
 import { API_VER_ENSURE_REQURL_OK } from "./baseTypesObs";
 import { messyConfigToNormal, normalConfigToMessy } from "./configPersist";
-import { exportVaultSyncPlansToFiles } from "./debugMode";
+import {
+  appendDebugLogToVault,
+  exportVaultSyncPlansToFiles,
+} from "./debugMode";
 import {
   DEFAULT_DROPBOX_CONFIG,
   sendAuthReq as sendAuthReqDropbox,
@@ -407,6 +411,12 @@ export default class RemotelySavePlugin extends Plugin {
 
     const errNotifyFunc = async (s: SyncTriggerSourceType, error: Error) => {
       console.error(error);
+      await this.logDebugError(
+        "syncRun",
+        error,
+        s,
+        overrideSyncDirection ?? this.settings.syncDirection
+      );
       if (error instanceof AggregateError) {
         for (const e of error.errors) {
           getNotice(s, e.message, 10 * 1000);
@@ -618,6 +628,7 @@ export default class RemotelySavePlugin extends Plugin {
       );
     } catch (err: any) {
       console.error("[CleanSyncDown Error]", err);
+      await this.logDebugError("cleanSyncDownRun", err, "manual");
       const ts = Date.now();
       await upsertLastFailedSyncTimeByVault(this.db, this.vaultRandomID, ts);
       this.updateLastSyncMsg("manual", "not_syncing", null, ts);
@@ -1976,11 +1987,34 @@ export default class RemotelySavePlugin extends Plugin {
     }
   }
 
+  async logDebugError(
+    context: string,
+    error: unknown,
+    triggerSource?: string,
+    syncDirection?: string
+  ) {
+    await appendDebugLogToVault(this.app.vault, {
+      level: "ERROR",
+      context,
+      version: this.manifest?.version,
+      serviceType: this.settings?.serviceType,
+      triggerSource,
+      syncDirection,
+      error,
+    });
+  }
+
   async _checkCurrFileModified(caller: "SYNC" | "FILE_CHANGES") {
     console.debug(`inside checkCurrFileModified`);
     const currentFile = this.app.workspace.getActiveFile();
 
     if (currentFile) {
+      if (
+        currentFile.path === DEFAULT_DEBUG_LOG_FILE ||
+        currentFile.path.startsWith("_debug_remotely_save/")
+      ) {
+        return;
+      }
       console.debug(`we have currentFile=${currentFile.path}`);
       // get the last modified time of the current file
       // if it has modified after lastSuccessSync

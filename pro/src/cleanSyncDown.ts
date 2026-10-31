@@ -116,7 +116,10 @@ export async function cleanSyncDown(
       k === ".trash" ||
       k.startsWith(".trash/") ||
       k === ".git" ||
-      k.startsWith(".git/")
+      k.startsWith(".git/") ||
+      k === "_vicsync_debug.md" ||
+      k === "_debug_remotely_save/" ||
+      k.startsWith("_debug_remotely_save/")
     ) {
       return false;
     }
