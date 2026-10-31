@@ -1,14 +1,14 @@
 import cloneDeep from "lodash/cloneDeep";
 import { type App, Modal, Notice, Setting } from "obsidian";
-import { getClient } from "../storage/fsGetter";
-import type { TransItemType } from "../utils/i18n";
 import type RemotelySavePlugin from "../main";
-import { stringToFragment } from "../utils/misc";
-import { ChangeRemoteBaseDirModal } from "./settings";
 import {
   DEFAULT_GOOGLEDRIVE_CONFIG,
   sendRefreshTokenReq,
 } from "../storage/fsGoogleDrive";
+import { getClient } from "../storage/fsGetter";
+import type { TransItemType } from "../utils/i18n";
+import { stringToFragment } from "../utils/misc";
+import { ChangeRemoteBaseDirModal } from "./settings";
 
 class GoogleDriveAuthModal extends Modal {
   readonly plugin: RemotelySavePlugin;
@@ -89,7 +89,6 @@ class GoogleDriveAuthModal extends Modal {
             this.plugin.settings.googledrive.accessTokenExpiresAtTimeMs = 1;
             this.plugin.settings.googledrive.accessTokenExpiresInMs = 1;
 
-            // TODO: abstraction leaking now, how to fix?
             const k = await sendRefreshTokenReq(refreshToken);
             const ts = Date.now();
             this.plugin.settings.googledrive.accessToken = k.access_token;
@@ -98,12 +97,10 @@ class GoogleDriveAuthModal extends Modal {
             this.plugin.settings.googledrive.accessTokenExpiresAtTimeMs =
               ts + k.expires_in * 1000 - 60 * 2 * 1000;
 
-            // Do not expire credentials
             this.plugin.settings.googledrive.credentialsShouldBeDeletedAtTimeMs =
               Number.MAX_SAFE_INTEGER;
             await this.plugin.saveSettings();
 
-            // try to remove data in clipboard
             await navigator.clipboard.writeText("");
 
             try {
@@ -128,14 +125,14 @@ class GoogleDriveAuthModal extends Modal {
             await this.plugin.logDebugError("GoogleDriveAuthModal", e);
             new Notice(t("modal_googledrive_maualinput_fail_notice"));
           } finally {
-            this.authDiv.toggleClass(
-              "googledrive-auth-button-hide",
-              this.plugin.settings.googledrive.refreshToken !== ""
-            );
+            const hasToken = this.plugin.settings.googledrive.refreshToken !== "";
+            this.authDiv.toggleClass("googledrive-auth-button-hide", hasToken);
             this.revokeAuthDiv.toggleClass(
               "googledrive-revoke-auth-button-hide",
-              this.plugin.settings.googledrive.refreshToken === ""
+              !hasToken
             );
+            this.authDiv.style.display = hasToken ? "none" : "";
+            this.revokeAuthDiv.style.display = hasToken ? "" : "none";
             this.close();
           }
         });
@@ -199,17 +196,16 @@ class GoogleDriveRevokeAuthModal extends Modal {
             );
 
             await this.plugin.saveSettings();
-            this.authDiv.toggleClass(
-              "googledrive-auth-button-hide",
-              this.plugin.settings.googledrive.refreshToken !== ""
-            );
+            this.authDiv.toggleClass("googledrive-auth-button-hide", false);
             this.revokeAuthDiv.toggleClass(
               "googledrive-revoke-auth-button-hide",
-              this.plugin.settings.googledrive.refreshToken === ""
+              true
             );
             this.authDiv.style.display = "";
             this.revokeAuthDiv.style.display = "none";
-            this.revokeAuthSetting.setDesc(t("settings_googledrive_revoke_desc"));
+            this.revokeAuthSetting.setDesc(
+              t("settings_googledrive_revoke_desc")
+            );
             new Notice(t("modal_googledriverevokeauth_clean_notice"));
             this.close();
           } catch (err) {
@@ -230,8 +226,7 @@ export const generateGoogleDriveSettingsPart = (
   containerEl: HTMLElement,
   t: (x: TransItemType, vars?: any) => string,
   app: App,
-  plugin: RemotelySavePlugin,
-  saveUpdatedConfigFunc: () => Promise<any> | undefined
+  plugin: RemotelySavePlugin
 ) => {
   const googleDriveDiv = containerEl.createEl("div", {
     cls: "googledrive-hide",
@@ -240,7 +235,8 @@ export const generateGoogleDriveSettingsPart = (
     "googledrive-hide",
     plugin.settings.serviceType !== "googledrive"
   );
-  googleDriveDiv.style.display = plugin.settings.serviceType === "googledrive" ? "" : "none";
+  googleDriveDiv.style.display =
+    plugin.settings.serviceType === "googledrive" ? "" : "none";
   googleDriveDiv.createEl("h2", { text: t("settings_googledrive") });
 
   const googleDriveLongDescDiv = googleDriveDiv.createEl("div", {
@@ -258,42 +254,11 @@ export const generateGoogleDriveSettingsPart = (
 
   googleDriveLongDescDiv.createEl("p", {
     text: t("settings_googledrive_folder", {
-      remoteBaseDir:
-        plugin.settings.googledrive.remoteBaseDir || "Obsidian",
+      remoteBaseDir: plugin.settings.googledrive.remoteBaseDir || "Obsidian",
     }),
   });
 
-  // PRO disclaimer removed for forked build
-
-  const googleDriveNotShowUpHintSetting = new Setting(googleDriveDiv)
-    .setName(t("settings_googledrive_notshowuphint"))
-    .setDesc(t("settings_googledrive_notshowuphint_desc"))
-    .addButton(async (button) => {
-      button.setButtonText(t("settings_googledrive_notshowuphint_view_pro"));
-      button.onClick(async () => {
-        window.location.href = "#settings-pro";
-      });
-    });
-
-  const googleDriveAllowedToUsedDiv = googleDriveDiv.createDiv();
-  // if pro enabled, show up; otherwise hide.
-  // Forked: Google Drive enabled directly
-  const allowGoogleDrive = true;
-  console.debug(`allow to show up google drive settings? ${allowGoogleDrive}`);
-  if (allowGoogleDrive) {
-    googleDriveAllowedToUsedDiv.removeClass("googledrive-allow-to-use-hide");
-    googleDriveNotShowUpHintSetting.settingEl.addClass(
-      "googledrive-allow-to-use-hide"
-    );
-    googleDriveNotShowUpHintSetting.settingEl.style.display = "none";
-  } else {
-    googleDriveAllowedToUsedDiv.addClass("googledrive-allow-to-use-hide");
-    googleDriveNotShowUpHintSetting.settingEl.removeClass(
-      "googledrive-allow-to-use-hide"
-    );
-  }
-
-  const googleDriveSelectAuthDiv = googleDriveAllowedToUsedDiv.createDiv();
+  const googleDriveSelectAuthDiv = googleDriveDiv.createDiv();
   const googleDriveAuthDiv = googleDriveSelectAuthDiv.createDiv({
     cls: "googledrive-auth-button-hide settings-auth-related",
   });
@@ -318,7 +283,6 @@ export const generateGoogleDriveSettingsPart = (
       });
     });
 
-  // Fetch and display user identity if authorized
   if (plugin.settings.googledrive?.refreshToken) {
     try {
       const client = getClient(plugin.settings, app.vault.getName(), () =>
@@ -345,36 +309,29 @@ export const generateGoogleDriveSettingsPart = (
     .addButton(async (button) => {
       button.setButtonText(t("settings_googledrive_auth_button"));
       button.onClick(async () => {
-        const modal = new GoogleDriveAuthModal(
+        new GoogleDriveAuthModal(
           app,
           plugin,
           googleDriveAuthDiv,
           googleDriveRevokeAuthDiv,
           googleDriveRevokeAuthSetting,
           t
-        );
-        plugin.oauth2Info.helperModal = modal;
-        plugin.oauth2Info.authDiv = googleDriveAuthDiv;
-        plugin.oauth2Info.revokeDiv = googleDriveRevokeAuthDiv;
-        plugin.oauth2Info.revokeAuthSetting = googleDriveRevokeAuthSetting;
-        modal.open();
+        ).open();
       });
     });
 
-  googleDriveAuthDiv.toggleClass(
-    "googledrive-auth-button-hide",
-    plugin.settings.googledrive.refreshToken !== ""
-  );
+  const hasRefreshToken = plugin.settings.googledrive.refreshToken !== "";
+  googleDriveAuthDiv.toggleClass("googledrive-auth-button-hide", hasRefreshToken);
   googleDriveRevokeAuthDiv.toggleClass(
     "googledrive-revoke-auth-button-hide",
-    plugin.settings.googledrive.refreshToken === ""
+    !hasRefreshToken
   );
-  googleDriveAuthDiv.style.display = plugin.settings.googledrive.refreshToken !== "" ? "none" : "";
-  googleDriveRevokeAuthDiv.style.display = plugin.settings.googledrive.refreshToken === "" ? "none" : "";
+  googleDriveAuthDiv.style.display = hasRefreshToken ? "none" : "";
+  googleDriveRevokeAuthDiv.style.display = hasRefreshToken ? "" : "none";
 
   let newgoogleDriveRemoteBaseDir =
     plugin.settings.googledrive.remoteBaseDir || "Obsidian";
-  new Setting(googleDriveAllowedToUsedDiv)
+  new Setting(googleDriveDiv)
     .setName(t("settings_remotebasedir"))
     .setDesc(t("settings_remotebasedir_desc"))
     .addText((text) =>
@@ -396,7 +353,8 @@ export const generateGoogleDriveSettingsPart = (
         ).open();
       });
     });
-  new Setting(googleDriveAllowedToUsedDiv)
+
+  new Setting(googleDriveDiv)
     .setName(t("settings_checkonnectivity"))
     .setDesc(t("settings_checkonnectivity_desc"))
     .addButton(async (button) => {
@@ -425,8 +383,6 @@ export const generateGoogleDriveSettingsPart = (
     });
 
   return {
-    googleDriveDiv: googleDriveDiv,
-    googleDriveAllowedToUsedDiv: googleDriveAllowedToUsedDiv,
-    googleDriveNotShowUpHintSetting: googleDriveNotShowUpHintSetting,
+    googleDriveDiv,
   };
 };

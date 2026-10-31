@@ -1,9 +1,11 @@
 import { strict as assert } from "assert";
+import type { MixedEntity } from "../src/baseTypes";
+import { getGoogleDriveDupBaseKey } from "../src/sync/clearDupFiles";
 import {
   checkIsSkipItemOrNotByName,
+  detectLocalMoves,
   detectRemoteMoves,
 } from "../src/sync/sync";
-import type { MixedEntity } from "../src/baseTypes";
 
 describe("Sync: checkIsSkipItemOrNotByName", () => {
   it("should be ok everywhere for empty config", async () => {
@@ -333,3 +335,112 @@ describe("Sync: detectRemoteMoves", () => {
     assert.equal(mappings["NewFolder/"].decision, undefined);
   });
 });
+
+describe("Sync: detectLocalMoves & duplicate detection", () => {
+  it("should detect local journal archive move via basename and size", () => {
+    const oldPath = "Journals/Current/2026 - Week 44.md";
+    const newPath = "Journals/~Past/2026 - Week 44/2026 - Week 44.md";
+
+    const mappings: Record<string, MixedEntity> = {
+      [oldPath]: {
+        key: oldPath,
+        local: undefined,
+        prevSync: {
+          keyRaw: oldPath,
+          id: "gd-id-week44",
+          mtimeCli: 1700000000000,
+          mtimeSvr: 1700000000000,
+          sizeRaw: 4096,
+          sizeEnc: 4096,
+        },
+        remote: {
+          keyRaw: oldPath,
+          id: "gd-id-week44",
+          mtimeCli: 1700000000000,
+          mtimeSvr: 1700000000000,
+          sizeRaw: 4096,
+          sizeEnc: 4096,
+        },
+      },
+      [newPath]: {
+        key: newPath,
+        local: {
+          keyRaw: newPath,
+          mtimeCli: 1700000000000,
+          sizeRaw: 4096,
+          sizeEnc: 4096,
+        },
+        prevSync: undefined,
+        remote: undefined,
+      },
+    };
+
+    detectLocalMoves(mappings);
+
+    assert.equal(mappings[oldPath].decision, "local_is_moved_source");
+    assert.equal(mappings[oldPath].moveTargetKey, newPath);
+    assert.equal(
+      mappings[newPath].decision,
+      "local_is_moved_then_rename_remote"
+    );
+    assert.equal(mappings[newPath].moveSourceKey, oldPath);
+  });
+
+  it("should detect local in-place rename via matching mtimeCli and size", () => {
+    const oldPath = "Notes/Draft.md";
+    const newPath = "Notes/Published.md";
+
+    const mappings: Record<string, MixedEntity> = {
+      [oldPath]: {
+        key: oldPath,
+        local: undefined,
+        prevSync: {
+          keyRaw: oldPath,
+          mtimeCli: 1700000500000,
+          mtimeSvr: 1700000500000,
+          sizeRaw: 1024,
+          sizeEnc: 1024,
+        },
+        remote: {
+          keyRaw: oldPath,
+          mtimeCli: 1700000500000,
+          mtimeSvr: 1700000500000,
+          sizeRaw: 1024,
+          sizeEnc: 1024,
+        },
+      },
+      [newPath]: {
+        key: newPath,
+        local: {
+          keyRaw: newPath,
+          mtimeCli: 1700000500000,
+          sizeRaw: 1024,
+          sizeEnc: 1024,
+        },
+        prevSync: undefined,
+        remote: undefined,
+      },
+    };
+
+    detectLocalMoves(mappings);
+
+    assert.equal(mappings[oldPath].decision, "local_is_moved_source");
+    assert.equal(
+      mappings[newPath].decision,
+      "local_is_moved_then_rename_remote"
+    );
+  });
+
+  it("should detect Google Drive (1).md duplicate filenames", () => {
+    assert.equal(
+      getGoogleDriveDupBaseKey("Journals/2026 - Week 44 (1).md"),
+      "Journals/2026 - Week 44.md"
+    );
+    assert.equal(
+      getGoogleDriveDupBaseKey("Notes/Meeting (2).pdf"),
+      "Notes/Meeting.pdf"
+    );
+    assert.equal(getGoogleDriveDupBaseKey("Journals/2026 - Week 44.md"), undefined);
+  });
+});
+

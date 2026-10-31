@@ -701,16 +701,11 @@ export class RemotelySaveSettingTab extends PluginSettingTab {
     // below for googledrive
     //////////////////////////////////////////////////
 
-    const {
-      googleDriveDiv,
-      googleDriveAllowedToUsedDiv,
-      googleDriveNotShowUpHintSetting,
-    } = generateGoogleDriveSettingsPart(
+    const { googleDriveDiv } = generateGoogleDriveSettingsPart(
       containerEl,
       t,
       this.app,
-      this.plugin,
-      () => this.plugin.saveSettings()
+      this.plugin
     );
     googleDriveDiv.style.display =
       this.plugin.settings.serviceType === "googledrive" ? "" : "none";
@@ -723,14 +718,15 @@ export class RemotelySaveSettingTab extends PluginSettingTab {
     // below for general chooser (part 2/2)
     //////////////////////////////////////////////////
 
-    // we need to create chooser
-    // after all service-div-s being created
     new Setting(serviceChooserDiv)
       .setName(t("settings_chooseservice"))
       .setDesc(t("settings_chooseservice_desc"))
       .addDropdown(async (dropdown) => {
+        dropdown.addOption(
+          "googledrive",
+          t("settings_chooseservice_googledrive")
+        );
         dropdown.addOption("s3", t("settings_chooseservice_s3"));
-        dropdown.addOption("googledrive", "Google Drive");
 
         dropdown
           .setValue(this.plugin.settings.serviceType)

@@ -822,7 +822,74 @@ export class FakeFsGoogleDrive extends FakeFs {
   }
 
   async rename(key1: string, key2: string): Promise<void> {
-    throw new Error("Method not implemented.");
+    if (key1 === key2) {
+      return;
+    }
+    await this._init();
+
+    const oldEntity = this.keyToGDEntity[key1];
+    if (oldEntity === undefined || !oldEntity.id) {
+      throw Error(`no fileID found for key=${key1} in Google Drive rename`);
+    }
+
+    const folderLevels = getFolderLevels(key2);
+    let newParentID: string;
+    let newParentFolderPath: string;
+    if (folderLevels.length === 0) {
+      newParentID = this.baseDirID;
+      newParentFolderPath = "";
+    } else {
+      newParentFolderPath = `${folderLevels[folderLevels.length - 1]}/`;
+      if (!(newParentFolderPath in this.keyToGDEntity)) {
+        throw Error(
+          `parent folder ${newParentFolderPath} for ${key2} does not exist in Google Drive cache`
+        );
+      }
+      newParentID = this.keyToGDEntity[newParentFolderPath].id;
+    }
+
+    const newFileName = key2.split("/").filter(Boolean).pop()!;
+    const oldParentID = oldEntity.parentID;
+
+    const queryParts: string[] = [
+      "fields=kind,fileExtension,md5Checksum,mimeType,parents,size,spaces,id,name,trashed,createdTime,modifiedTime,quotaBytesUsed,originalFilename,fullFileExtension,sha1Checksum,sha256Checksum",
+    ];
+    if (newParentID !== oldParentID) {
+      queryParts.push(`addParents=${encodeURIComponent(newParentID)}`);
+      if (oldParentID) {
+        queryParts.push(`removeParents=${encodeURIComponent(oldParentID)}`);
+      }
+    }
+
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${oldEntity.id}?${queryParts.join("&")}`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${await this._getAccessToken()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: newFileName,
+        }),
+      }
+    );
+
+    if (res.status !== 200) {
+      const errText = await res.text().catch(() => "");
+      throw Error(
+        `cannot rename ${key1} -> ${key2} using fileID=${oldEntity.id} (HTTP ${res.status}: ${errText})`
+      );
+    }
+
+    const updatedFile: File = await res.json();
+    const updatedEntity = fromFileToGDEntity(
+      updatedFile,
+      newParentID,
+      newParentFolderPath
+    );
+    this.keyToGDEntity[key2] = updatedEntity;
+    delete this.keyToGDEntity[key1];
   }
 
   /**

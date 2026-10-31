@@ -508,6 +508,7 @@ const ensembleMixedEnties = async (
   profiler?.insertSize("sizeof finalMappings", finalMappings);
 
   detectRemoteMoves(finalMappings, profiler);
+  detectLocalMoves(finalMappings, profiler);
 
   // console.debug("in the end of ensembleMixedEnties, finalMappings is:");
   // console.debug(finalMappings);
@@ -637,6 +638,143 @@ export const detectRemoteMoves = (
 };
 
 /**
+ * Detects when a local file was moved or archived into another folder in Obsidian
+ * (e.g. moving weekly journals from "Journals/Current/" to "Journals/~Past/YYYY - Week XX/").
+ * Pairs candidate local deletions (where remote still exists and is unmodified)
+ * with candidate local creations so remote files can be moved in place on Google Drive
+ * instead of being trashed and re-uploaded from scratch.
+ */
+export const detectLocalMoves = (
+  finalMappings: Record<string, MixedEntity>,
+  profiler?: Profiler
+) => {
+  profiler?.addIndent();
+  profiler?.insert("detectLocalMoves: enter");
+
+  const candidateDeletions: MixedEntity[] = [];
+  const candidateCreations: MixedEntity[] = [];
+
+  for (const key of Object.keys(finalMappings)) {
+    if (key.endsWith("/")) {
+      continue;
+    }
+    const entry = finalMappings[key];
+    if (entry.decision !== undefined) {
+      continue;
+    }
+    if (
+      entry.prevSync !== undefined &&
+      entry.remote !== undefined &&
+      entry.local === undefined
+    ) {
+      const prevSize = entry.prevSync.sizeEnc ?? entry.prevSync.sizeRaw;
+      const remSize = entry.remote.sizeEnc ?? entry.remote.sizeRaw;
+      const remoteUnmodified =
+        prevSize === remSize &&
+        (entry.prevSync.mtimeSvr === entry.remote.mtimeSvr ||
+          entry.prevSync.mtimeCli === entry.remote.mtimeCli ||
+          (entry.prevSync.hash !== undefined &&
+            entry.remote.hash !== undefined &&
+            entry.prevSync.hash === entry.remote.hash));
+      if (remoteUnmodified) {
+        candidateDeletions.push(entry);
+      }
+    } else if (
+      entry.local !== undefined &&
+      entry.prevSync === undefined &&
+      entry.remote === undefined
+    ) {
+      candidateCreations.push(entry);
+    }
+  }
+
+  if (candidateDeletions.length === 0 || candidateCreations.length === 0) {
+    profiler?.insert("detectLocalMoves: no candidate pairs");
+    profiler?.removeIndent();
+    return;
+  }
+
+  const matchedCreations = new Set<string>();
+
+  for (const del of candidateDeletions) {
+    const prev = del.prevSync!;
+    const prevSize = prev.sizeEnc ?? prev.sizeRaw;
+    const prevMtime = prev.mtimeCli;
+    const delBasename = del.key.split("/").pop()!;
+
+    let matchedCreation: MixedEntity | undefined = undefined;
+
+    // Pass 1: Match by identical filename (basename) + identical size (archiving to another folder)
+    for (const cre of candidateCreations) {
+      if (matchedCreations.has(cre.key)) {
+        continue;
+      }
+      const loc = cre.local!;
+      const locSize = loc.sizeEnc ?? loc.sizeRaw;
+      const creBasename = cre.key.split("/").pop()!;
+
+      if (
+        delBasename === creBasename &&
+        prevSize !== undefined &&
+        locSize !== undefined &&
+        prevSize === locSize &&
+        (prevSize > 0 || (prevMtime !== undefined && prevMtime === loc.mtimeCli))
+      ) {
+        matchedCreation = cre;
+        console.debug(
+          `Detected local move via basename & size ("${delBasename}", ${prevSize}B): "${del.key}" -> "${cre.key}"`
+        );
+        break;
+      }
+    }
+
+    // Pass 2: Match by identical non-zero size + identical mtimeCli (in-place rename without edit)
+    if (matchedCreation === undefined) {
+      for (const cre of candidateCreations) {
+        if (matchedCreations.has(cre.key)) {
+          continue;
+        }
+        const loc = cre.local!;
+        const locSize = loc.sizeEnc ?? loc.sizeRaw;
+        if (
+          prevSize !== undefined &&
+          locSize !== undefined &&
+          prevSize > 0 &&
+          prevSize === locSize &&
+          prevMtime !== undefined &&
+          loc.mtimeCli !== undefined &&
+          prevMtime === loc.mtimeCli
+        ) {
+          matchedCreation = cre;
+          console.debug(
+            `Detected local rename via mtime & size (${prevSize}B): "${del.key}" -> "${cre.key}"`
+          );
+          break;
+        }
+      }
+    }
+
+    if (matchedCreation !== undefined) {
+      matchedCreations.add(matchedCreation.key);
+
+      del.decision = "local_is_moved_source";
+      del.decisionBranch = 405;
+      del.change = true;
+      del.moveTargetKey = matchedCreation.key;
+
+      matchedCreation.decision = "local_is_moved_then_rename_remote";
+      matchedCreation.decisionBranch = 406;
+      matchedCreation.change = true;
+      matchedCreation.moveSourceKey = del.key;
+      matchedCreation.prevSync = del.prevSync;
+    }
+  }
+
+  profiler?.insert("detectLocalMoves: exit");
+  profiler?.removeIndent();
+};
+
+/**
  * Heavy lifting.
  * Basically follow the sync algorithm of https://github.com/Jwink3101/syncrclone
  * Also deal with syncDirection which makes it more complicated
@@ -676,11 +814,52 @@ const getSyncPlanInplace = async (
     // console.debug(`getSyncPlanInplace: key=${key}`)
 
     if (mixedEntry.decision === "remote_is_moved_source") {
-      continue;
+      if (
+        syncDirection === "incremental_push_only" ||
+        syncDirection === "incremental_push_and_delete_only" ||
+        syncDirection === "incremental_pull_only"
+      ) {
+        mixedEntry.decision = undefined;
+      } else {
+        continue;
+      }
     }
     if (mixedEntry.decision === "remote_is_moved_then_rename_local") {
-      keptFolder.add(getParentFolder(key));
-      continue;
+      if (
+        syncDirection === "incremental_push_only" ||
+        syncDirection === "incremental_push_and_delete_only" ||
+        syncDirection === "incremental_pull_only"
+      ) {
+        mixedEntry.decision = undefined;
+        mixedEntry.prevSync = undefined;
+      } else {
+        keptFolder.add(getParentFolder(key));
+        continue;
+      }
+    }
+    if (mixedEntry.decision === "local_is_moved_source") {
+      if (
+        syncDirection === "incremental_pull_only" ||
+        syncDirection === "incremental_pull_and_delete_only" ||
+        syncDirection === "incremental_push_only"
+      ) {
+        mixedEntry.decision = undefined;
+      } else {
+        continue;
+      }
+    }
+    if (mixedEntry.decision === "local_is_moved_then_rename_remote") {
+      if (
+        syncDirection === "incremental_pull_only" ||
+        syncDirection === "incremental_pull_and_delete_only" ||
+        syncDirection === "incremental_push_only"
+      ) {
+        mixedEntry.decision = undefined;
+        mixedEntry.prevSync = undefined;
+      } else {
+        keptFolder.add(getParentFolder(key));
+        continue;
+      }
     }
 
     if (key.endsWith("/")) {
@@ -1438,7 +1617,10 @@ const splitFourStepsOnEntityMappings = (
         // only count files here, skip folder
         realModifyDeleteCount += 1;
       }
-    } else if (val.decision === "remote_is_moved_source") {
+    } else if (
+      val.decision === "remote_is_moved_source" ||
+      val.decision === "local_is_moved_source"
+    ) {
       if (
         onlyMarkSyncedOps.length === 0 ||
         onlyMarkSyncedOps[0] === undefined ||
@@ -1449,7 +1631,10 @@ const splitFourStepsOnEntityMappings = (
         onlyMarkSyncedOps[0].push(val);
       }
       realTotalCount += 1;
-    } else if (val.decision === "remote_is_moved_then_rename_local") {
+    } else if (
+      val.decision === "remote_is_moved_then_rename_local" ||
+      val.decision === "local_is_moved_then_rename_remote"
+    ) {
       if (
         moveOps.length === 0 ||
         moveOps[0] === undefined ||
@@ -1721,7 +1906,10 @@ const dispatchOperationToActualV3 = async (
         );
       }
     }
-  } else if (r.decision === "remote_is_moved_source") {
+  } else if (
+    r.decision === "remote_is_moved_source" ||
+    r.decision === "local_is_moved_source"
+  ) {
     await clearPrevSyncRecordByVaultAndProfile(
       db,
       vaultRandomID,
@@ -1735,6 +1923,90 @@ const dispatchOperationToActualV3 = async (
         profileID,
         r.key
       );
+    }
+  } else if (r.decision === "local_is_moved_then_rename_remote") {
+    const oldKey = r.moveSourceKey!;
+    const newKey = r.key;
+    const mtimeCli = (await fsLocal.stat(newKey)).mtimeCli!;
+    let entity: Entity | undefined = undefined;
+    let content: ArrayBuffer | undefined = undefined;
+
+    console.info(
+      `local move detected: renaming remote "${oldKey}" -> "${newKey}"`
+    );
+    try {
+      await fsRemote.rename(oldKey, newKey);
+      entity = await fsRemote.stat(newKey);
+    } catch (err: any) {
+      console.warn(
+        `Could not rename remote "${oldKey}" to "${newKey}": ${err?.message || err}. Falling back to upload + delete.`
+      );
+      const copied = await copyFile(newKey, fsLocal, fsRemote);
+      entity = copied.entity;
+      content = copied.content;
+      try {
+        await fsRemote.rm(oldKey);
+      } catch (rmErr) {
+        // Ignore rm failure
+      }
+    }
+
+    const prevEntity = r.prevSync;
+    const localWasModified =
+      prevEntity !== undefined &&
+      prevEntity.mtimeCli !== undefined &&
+      r.local?.mtimeCli !== undefined &&
+      r.local.mtimeCli !== prevEntity.mtimeCli;
+
+    if (localWasModified) {
+      console.info(
+        `local file was also modified during/after move, uploading latest content: "${newKey}"`
+      );
+      const copied = await copyFile(newKey, fsLocal, fsRemote);
+      entity = copied.entity;
+      content = copied.content;
+    }
+
+    if (entity !== undefined) {
+      fullfillMTimeOfRemoteEntityInplace(entity, mtimeCli);
+      await upsertPrevSyncRecordByVaultAndProfile(
+        db,
+        vaultRandomID,
+        profileID,
+        entity
+      );
+    }
+    await clearPrevSyncRecordByVaultAndProfile(
+      db,
+      vaultRandomID,
+      profileID,
+      oldKey
+    );
+
+    if (conflictAction === "smart_conflict" && entity !== undefined) {
+      try {
+        if (isMergable(entity)) {
+          const fileContent = content ?? (await fsLocal.readFile(newKey));
+          await upsertFileContentHistoryByVaultAndProfile(
+            db,
+            vaultRandomID,
+            profileID,
+            entity,
+            fileContent
+          );
+        }
+        await clearFileContentHistoryByVaultAndProfile(
+          db,
+          vaultRandomID,
+          profileID,
+          oldKey
+        );
+      } catch (err) {
+        console.debug(
+          "Could not update file content history for locally moved file",
+          err
+        );
+      }
     }
   } else if (r.decision === "remote_is_moved_then_rename_local") {
     const oldKey = r.moveSourceKey!;
@@ -2171,6 +2443,7 @@ export async function syncer(
 
   let everythingOk = true;
   let step = 0;
+  let mixedEntityMappings: Record<string, MixedEntity> | undefined = undefined;
 
   try {
     // try mode?
@@ -2193,8 +2466,6 @@ export async function syncer(
     await ribboonFunc?.(triggerSource, step);
     await statusBarFunc?.(triggerSource, step, everythingOk);
     const remoteEntityList = await fsRemote.walk();
-    // console.debug(`remoteEntityList:`);
-    // console.debug(remoteEntityList);
     profiler?.insert(`finish step${step} (list remote)`);
 
     step = 4;
@@ -2202,8 +2473,6 @@ export async function syncer(
     await ribboonFunc?.(triggerSource, step);
     await statusBarFunc?.(triggerSource, step, everythingOk);
     const localEntityList = await fsLocal.walk();
-    // console.debug(`localEntityList:`);
-    // console.debug(localEntityList);
     profiler?.insert(`finish step${step} (list local)`);
 
     step = 5;
@@ -2215,15 +2484,13 @@ export async function syncer(
       vaultRandomID,
       profileID
     );
-    // console.debug(`prevSyncEntityList:`);
-    // console.debug(prevSyncEntityList);
     profiler?.insert(`finish step${step} (prev sync)`);
 
     step = 6;
     await notifyFunc?.(triggerSource, step);
     await ribboonFunc?.(triggerSource, step);
     await statusBarFunc?.(triggerSource, step, everythingOk);
-    let mixedEntityMappings = await ensembleMixedEnties(
+    mixedEntityMappings = await ensembleMixedEnties(
       localEntityList,
       prevSyncEntityList,
       remoteEntityList,
@@ -2241,7 +2508,7 @@ export async function syncer(
     mixedEntityMappings = await getSyncPlanInplace(
       mixedEntityMappings,
       settings.skipSizeLargerThan ?? -1,
-      settings.conflictAction ?? "keep_newer",
+      settings.conflictAction ?? "smart_conflict",
       settings.syncDirection ?? "bidirectional",
       profiler,
       settings,
@@ -2249,7 +2516,7 @@ export async function syncer(
       configDir
     );
     console.debug(`mixedEntityMappings:`);
-    console.debug(mixedEntityMappings); // for debugging
+    console.debug(mixedEntityMappings);
     profiler?.insert("finish building full sync plan");
 
     await insertSyncPlanRecordByVault(
@@ -2260,9 +2527,6 @@ export async function syncer(
     );
     profiler?.insert("finish writing sync plan");
     profiler?.insert(`finish step${step} (make plan)`);
-
-    // The operations above are almost read only and kind of safe.
-    // The operations below begins to write or delete (!!!) something.
 
     step = 7;
     if (triggerSource !== "dry") {
@@ -2280,7 +2544,7 @@ export async function syncer(
         getProtectModifyPercentageErrorStrFunc,
         db,
         profiler,
-        settings.conflictAction ?? "keep_newer",
+        settings.conflictAction ?? "smart_conflict",
         triggerSource,
         callbackSyncProcess
       );
@@ -2303,7 +2567,6 @@ export async function syncer(
   }
 
   profiler?.insert("finish syncRun");
-  // console.debug(profiler?.toString());
   await profiler?.save(db, vaultRandomID, settings.serviceType);
 
   step = 8;
@@ -2313,4 +2576,8 @@ export async function syncer(
 
   console.info(`ending sync.`);
   markIsSyncingFunc(false);
+  return {
+    everythingOk,
+    mixedEntityMappings,
+  };
 }

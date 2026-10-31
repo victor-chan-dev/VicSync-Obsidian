@@ -22,6 +22,7 @@ import { DEFAULT_GOOGLEDRIVE_CONFIG } from "./storage/fsGoogleDrive";
 import { cleanSyncDown } from "./sync/cleanSyncDown";
 import { syncer } from "./sync/sync";
 import { ResetLocalModal } from "./ui/resetLocalModal";
+import { SyncPlanPreviewModal, summarizeSyncPlan } from "./ui/syncPlanModal";
 import type {
   RemotelySavePluginSettings,
   SyncDirectionType,
@@ -50,6 +51,7 @@ import {
   getLastFailedSyncTimeByVault,
   getLastSuccessSyncTimeByVault,
   prepareDBs,
+  readAllSyncPlanRecordTextsByVault,
   upsertLastFailedSyncTimeByVault,
   upsertLastSuccessSyncTimeByVault,
   upsertPluginVersionByVault,
@@ -170,7 +172,6 @@ export default class RemotelySavePlugin extends Plugin {
   isSyncing!: boolean;
   hasPendingSyncOnSave!: boolean;
   statusBarElement!: HTMLSpanElement;
-  oauth2Info!: OAuth2Info;
   currLogLevel!: string;
   currSyncMsg?: string;
   syncRibbon?: HTMLElement;
@@ -450,7 +451,7 @@ export default class RemotelySavePlugin extends Plugin {
         ? { ...this.settings, syncDirection: overrideSyncDirection }
         : this.settings;
 
-    await syncer(
+    const res = await syncer(
       fsLocal,
       fsRemote,
       profiler,
@@ -471,9 +472,44 @@ export default class RemotelySavePlugin extends Plugin {
       callbackSyncProcess
     );
 
+    if (res?.mixedEntityMappings) {
+      if (triggerSource === "dry") {
+        new SyncPlanPreviewModal(
+          this.app,
+          res.mixedEntityMappings,
+          true,
+          async () => {
+            await this.syncRun("manual", overrideSyncDirection);
+          }
+        ).open();
+      } else if (triggerSource === "manual" && res.everythingOk) {
+        const summary = summarizeSyncPlan(res.mixedEntityMappings);
+        if (summary.totalActionCount > 0) {
+          new Notice(`VicSync: ${summary.shortSummary}`, 6000);
+        }
+      }
+    }
+
     (profiler as Profiler | undefined)?.clear();
 
     this.syncEvent?.trigger("SYNC_DONE");
+  }
+
+  async openLastSyncSummaryModal() {
+    const records = await readAllSyncPlanRecordTextsByVault(
+      this.db,
+      this.vaultRandomID
+    );
+    if (!records || records.length === 0) {
+      new Notice("No sync history available yet.");
+      return;
+    }
+    try {
+      const parsed = JSON.parse(records[0]);
+      new SyncPlanPreviewModal(this.app, parsed, false).open();
+    } catch (err) {
+      new Notice("Could not parse last sync plan.");
+    }
   }
 
   async cleanSyncDownRun() {
@@ -730,6 +766,14 @@ export default class RemotelySavePlugin extends Plugin {
             await this.syncRun("dry", "incremental_pull_and_delete_only");
           });
       });
+      menu.addItem((item) => {
+        item
+          .setTitle("View Last Sync Summary")
+          .setIcon(iconNameLogs)
+          .onClick(async () => {
+            await this.openLastSyncSummaryModal();
+          });
+      });
       menu.showAtMouseEvent(event);
     });
 
@@ -812,6 +856,15 @@ export default class RemotelySavePlugin extends Plugin {
       icon: iconNameSyncWait,
       callback: async () => {
         this.syncRun("dry", "incremental_pull_and_delete_only");
+      },
+    });
+
+    this.addCommand({
+      id: "view-last-sync-summary",
+      name: "View last sync summary",
+      icon: iconNameLogs,
+      callback: async () => {
+        await this.openLastSyncSummaryModal();
       },
     });
 
